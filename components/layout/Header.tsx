@@ -8,10 +8,12 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { useSession, signOut } from 'next-auth/react'
 import { NAV_ITEMS } from '@/lib/constants'
 import ThemeToggle from './ThemeToggle'
 
 export default function Header() {
+  const { data: session } = useSession()
   const [mobileOpen, setMobileOpen] = useState(false)
 
   return (
@@ -36,6 +38,26 @@ export default function Header() {
         </nav>
 
         <div className="flex items-center gap-2">
+          {session?.user ? (
+            <div className="hidden items-center gap-2 md:flex">
+              <span className="text-sm text-text-secondary">
+                {session.user.name}
+              </span>
+              <button
+                onClick={() => signOut({ callbackUrl: '/login' })}
+                className="rounded-md px-3 py-1.5 text-sm text-text-secondary hover:bg-bg-tertiary hover:text-text-primary transition-colors"
+              >
+                로그아웃
+              </button>
+            </div>
+          ) : (
+            <Link
+              href="/login"
+              className="hidden rounded-md px-3 py-1.5 text-sm text-text-secondary hover:bg-bg-tertiary hover:text-text-primary transition-colors md:block"
+            >
+              로그인
+            </Link>
+          )}
           <ThemeToggle />
           {/* 모바일 햄버거 */}
           <button
@@ -64,6 +86,25 @@ export default function Header() {
               )}
             </Link>
           ))}
+          {session?.user ? (
+            <div className="border-t border-border mt-2 pt-2">
+              <span className="block px-3 py-1 text-xs text-text-muted">{session.user.name}</span>
+              <button
+                onClick={() => { setMobileOpen(false); signOut({ callbackUrl: '/login' }) }}
+                className="block w-full rounded-md px-3 py-2 text-left text-sm text-text-secondary hover:bg-bg-tertiary"
+              >
+                로그아웃
+              </button>
+            </div>
+          ) : (
+            <Link
+              href="/login"
+              className="block rounded-md px-3 py-2 text-sm text-text-secondary hover:bg-bg-tertiary"
+              onClick={() => setMobileOpen(false)}
+            >
+              로그인
+            </Link>
+          )}
         </nav>
       )}
     </header>
