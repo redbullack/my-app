@@ -15,22 +15,28 @@ import type { Emp } from '@/types/emp'
  * @returns Emp 배열
  */
 export async function fetchEmpByNames(enames: string[]): Promise<Emp[]> {
-  let sql: string
-  let binds: Record<string, string>
+  try {
+    let sql: string
+    let binds: Record<string, string>
 
-  if (enames.length > 0) {
-    const bindKeys = enames.map((_, i) => `:ename${i}`)
-    const bindObj: Record<string, string> = {}
-    enames.forEach((name, i) => {
-      bindObj[`ename${i}`] = name
-    })
+    if (enames.length > 0) {
+      const bindKeys = enames.map((_, i) => `:ename${i}`)
+      const bindObj: Record<string, string> = {}
+      enames.forEach((name, i) => {
+        bindObj[`ename${i}`] = name
+      })
 
-    sql = `SELECT * FROM scott.emp WHERE ENAME IN (${bindKeys.join(', ')})`
-    binds = bindObj
-  } else {
-    sql = 'SELECT * FROM scott.emp'
-    binds = {}
+      sql = `SELECT * FROM scott.emp WHERE ENAME IN (${bindKeys.join(', ')})`
+      binds = bindObj
+    } else {
+      sql = 'SELECT * FROM scott.emp'
+      binds = {}
+    }
+
+    return queryOracle<Emp>(sql, binds)
+
+  } catch (error) {
+    console.error("DB Error:", error);
+    throw new Error('데이터를 불러오는 데 실패했습니다.');
   }
-
-  return queryOracle<Emp>(sql, binds)
 }
