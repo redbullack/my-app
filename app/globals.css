@@ -1,26 +1,86 @@
+/**
+ * @description TailwindCSS 4 전역 스타일 및 테마 토큰 정의
+ *
+ * TailwindCSS v4 문법:
+ * - @import "tailwindcss": v4에서는 이 한 줄로 모든 유틸리티를 불러온다 (v3의 @tailwind base/components/utilities 대체)
+ * - @theme inline { ... }: Tailwind 테마 토큰을 CSS 변수로 등록하여 유틸리티 클래스에서 사용 가능하게 한다
+ *   예: --color-bg-primary를 등록하면 bg-bg-primary 클래스로 사용 가능
+ * - CSS 변수 기반 테마: :root (라이트)와 .dark (다크) 선택자로 테마 토큰을 전환한다
+ * - dark: 변형: TailwindCSS의 dark: 접두사는 html.dark 클래스 유무에 따라 스타일을 적용한다
+ */
+
 @import "tailwindcss";
 
+/* ── Light Theme Tokens (기본값) ── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f8f9fa;
+  --color-bg-tertiary: #f1f3f5;
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #475569;
+  --color-text-muted: #94a3b8;
+  --color-border: #e2e8f0;
+  --color-accent: #3b82f6;
+  --color-accent-hover: #2563eb;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-info: #06b6d4;
 }
 
+/* ── Dark Theme Tokens ── */
+.dark {
+  --color-bg-primary: #0f172a;
+  --color-bg-secondary: #1e293b;
+  --color-bg-tertiary: #334155;
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #cbd5e1;
+  --color-text-muted: #64748b;
+  --color-border: #334155;
+  --color-accent: #60a5fa;
+  --color-accent-hover: #93c5fd;
+  --color-success: #4ade80;
+  --color-warning: #fbbf24;
+  --color-error: #f87171;
+  --color-info: #22d3ee;
+}
+
+/**
+ * @theme inline: Tailwind에 커스텀 토큰을 등록한다.
+ * 등록된 토큰은 bg-bg-primary, text-text-primary 등의 유틸리티 클래스로 사용 가능하다.
+ */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-bg-primary: var(--color-bg-primary);
+  --color-bg-secondary: var(--color-bg-secondary);
+  --color-bg-tertiary: var(--color-bg-tertiary);
+  --color-text-primary: var(--color-text-primary);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-text-muted: var(--color-text-muted);
+  --color-border: var(--color-border);
+  --color-accent: var(--color-accent);
+  --color-accent-hover: var(--color-accent-hover);
+  --color-success: var(--color-success);
+  --color-warning: var(--color-warning);
+  --color-error: var(--color-error);
+  --color-info: var(--color-info);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+/* ── 전역 기본 스타일 ── */
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-family: system-ui, -apple-system, sans-serif;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* ── 스크롤바 다크모드 대응 ── */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-bg-secondary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-text-muted);
+  border-radius: 4px;
 }

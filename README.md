@@ -1,36 +1,315 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Next.js 16 App Router Practice Framework
 
-## Getting Started
+Next.js 16의 모든 App Router 기능을 학습하고 체험할 수 있는 **포괄적인 연습용 프레임워크**입니다.
 
-First, run the development server:
+## 🎯 프로젝트 개요
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+| 항목 | 내용 |
+|------|------|
+| **목적** | Next.js 16 App Router 전체 기능 학습 및 실습 |
+| **프레임워크** | Next.js 16 (App Router) |
+| **UI 라이브러리** | React 19 |
+| **스타일링** | TailwindCSS 4 |
+| **언어** | TypeScript (strict mode) |
+| **패키지 매니저** | pnpm |
+
+## 🗂️ 포함된 라우팅 패턴
+
+이 프레임워크는 Next.js App Router의 **모든 라우팅 패턴**을 실제 동작하는 예제로 구현합니다.
+
+### 기본 라우팅
+- **Static Route** — `/` (홈페이지)
+- **Dynamic Segment** — `/blog/[slug]` (동적 매개변수)
+  - `generateStaticParams()` 활용한 SSG 구현
+  - 세그먼트별 `loading.tsx` 로딩 상태
+
+### 고급 라우팅
+- **Catch-all** — `/shop/[...categories]` (다단계 경로 캡처)
+- **Optional Catch-all** — `/docs/[[...slug]]` (루트 포함 선택적 캡처)
+
+### 레이아웃 그룹화
+- **Route Group** — `(marketing)` 그룹: `/about`, `/pricing`
+- **Route Group** — `(dashboard)` 그룹: `/dashboard`, `/settings` (사이드바 레이아웃)
+
+### 병렬 & 가로채기
+- **Parallel Routes** — `/feed` 페이지
+  - `@feed` 슬롯 (피드 목록)
+  - `@stories` 슬롯 (사이드 스토리)
+  - 독립적 로딩/에러 처리
+- **Intercepting Routes** — `/gallery`
+  - Link 클릭: 모달로 가로채기 `@modal/(.)gallery/[id]`
+  - 직접 URL: 전체 페이지 `/gallery/[id]`
+
+### Special Files
+- `loading.tsx` — Suspense 기반 로딩 스켈레톤
+- `error.tsx` — 전역 에러 바운더리
+- `not-found.tsx` — 404 처리
+- `default.tsx` — Parallel Routes fallback
+
+### API & 미들웨어
+- **Route Handler** — `/api/hello`, `/api/revalidate`
+- **Middleware** — 전역 요청 가로채기 및 헤더 조작
+- **Private Folder** — `_components` (라우팅 제외)
+
+## 🎨 테마 시스템
+
+### 3가지 테마 모드
+- **Light** — 밝은 테마
+- **Dark** — 어두운 테마
+- **System** — OS 시스템 설정 자동 감지
+
+### 구현 방식
+- **CSS 변수 기반** — `--color-bg-primary`, `--color-text-primary` 등
+- **TailwindCSS v4** — `@theme inline` 지시어로 테마 토큰 등록
+- **동적 토글** — `<ThemeToggle>` 컴포넌트로 실시간 전환
+- **localStorage 저장** — 새로고침 후에도 테마 유지
+- **FOUC 방지** — 인라인 스크립트로 초기 테마 즉시 적용
+
+모든 컴포넌트는 테마 토큰 색상을 사용하여 라이트/다크 모드에서 자동 대응합니다.
+
+## 🧩 컴포넌트 아키텍처
+
+### Control 컴포넌트 (`components/control/`)
+재사용 가능한 UI 컨트롤들:
+- **Button** — variant(primary/secondary/ghost/danger), size(sm/md/lg)
+- **Input** — label, error, helperText, 다양한 type 지원
+- **Select** — options 배열 기반, placeholder 지원
+- **Panel** — variant(default/outlined/elevated) 컨테이너
+- **Badge** — variant(info/success/warning/error) 상태 표시
+- **Modal** — 오버레이 + ESC 키 닫기 지원
+
+배럴 익스포트로 간편하게 import:
+```tsx
+import { Button, Input, Select, Panel, Badge, Modal } from '@/components/control'
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Layout 컴포넌트
+- **Header** — 전역 네비게이션 + 테마 토글
+- **Footer** — 참고 링크 및 프로젝트 정보
+- **Sidebar** — 대시보드 레이아웃용 (Route Group 데모)
+- **ThemeProvider** — Context API 기반 테마 관리
+- **ThemeToggle** — 테마 전환 버튼
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Shared 컴포넌트
+- **RouteInfo** — 각 페이지 하단의 라우팅 패턴 설명 카드
+- **CodeBlock** — 코드 스니펫 표시
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 📁 디렉토리 구조
 
-## Learn More
+```
+/app
+├── globals.css              # TailwindCSS v4 + 테마 토큰
+├── layout.tsx              # Root Layout
+├── page.tsx                # 홈페이지
+├── loading.tsx             # 루트 로딩 상태
+├── error.tsx               # 에러 바운더리
+├── not-found.tsx           # 404 페이지
+├── middleware.ts           # 전역 미들웨어
+│
+├── (marketing)/            # Route Group
+│   ├── layout.tsx
+│   ├── about/page.tsx
+│   └── pricing/page.tsx
+│
+├── (dashboard)/            # Route Group (사이드바 레이아웃)
+│   ├── layout.tsx
+│   ├── dashboard/page.tsx
+│   └── settings/page.tsx
+│
+├── blog/                   # 블로그
+│   ├── page.tsx           # 목록
+│   └── [slug]/            # 동적 세그먼트
+│       ├── page.tsx
+│       └── loading.tsx
+│
+├── shop/
+│   └── [...categories]/   # Catch-all
+│       └── page.tsx
+│
+├── docs/
+│   └── [[...slug]]/       # Optional Catch-all
+│       └── page.tsx
+│
+├── feed/                  # Parallel Routes
+│   ├── layout.tsx
+│   ├── page.tsx
+│   ├── @feed/
+│   │   ├── page.tsx
+│   │   └── default.tsx
+│   └── @stories/
+│       ├── page.tsx
+│       └── default.tsx
+│
+├── gallery/               # Intercepting Routes 대상
+│   ├── page.tsx
+│   └── [id]/
+│       └── page.tsx
+│
+├── @modal/                # Parallel Route (Intercepting용)
+│   ├── default.tsx
+│   └── (.)gallery/[id]/
+│       └── page.tsx
+│
+├── api/                   # Route Handlers
+│   ├── hello/route.ts
+│   └── revalidate/route.ts
+│
+└── _components/           # Private Folder
+    └── GalleryModal.tsx
 
-To learn more about Next.js, take a look at the following resources:
+/components
+├── control/              # 재사용 UI 컨트롤
+│   ├── Button.tsx
+│   ├── Input.tsx
+│   ├── Select.tsx
+│   ├── Panel.tsx
+│   ├── Badge.tsx
+│   ├── Modal.tsx
+│   └── index.ts
+├── layout/               # 레이아웃 컴포넌트
+│   ├── Header.tsx
+│   ├── Footer.tsx
+│   ├── Sidebar.tsx
+│   ├── ThemeProvider.tsx
+│   └── ThemeToggle.tsx
+└── shared/               # 페이지 간 공유
+    ├── RouteInfo.tsx
+    └── CodeBlock.tsx
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+/lib
+├── utils.ts             # 공통 유틸리티
+└── constants.ts         # 전역 상수 (네비게이션, 샘플 데이터)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+/types
+└── index.ts            # TypeScript 타입 정의
 
-## Deploy on Vercel
+/actions
+└── posts.ts            # Server Actions
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 🚀 주요 기능
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Server Components 기본 사용
+모든 컴포넌트는 기본적으로 Server Component로 작성되며, 인터랙션이 필요한 곳에만 `'use client'` 선언:
+```tsx
+// Server Component (기본값)
+export default async function Page({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params
+  // 데이터 페칭, DB 접근 가능
+}
+
+// Client Component (필요할 때만)
+'use client'
+import { useState } from 'react'
+export default function InteractiveComponent() { }
+```
+
+### Next.js 16 주요 변경사항 대응
+- **params & searchParams는 Promise** — 반드시 `await` 필수
+- **cookies()/headers()는 async** — `await` 후 사용
+- **Route Handler GET은 dynamic** — 기본값으로 캐싱 안 됨
+- **Type 헬퍼 활용** — `PageProps<'/route'>`, `LayoutProps<'/route'>` 글로벌 타입
+
+### Server Actions 패턴
+```tsx
+// actions/posts.ts
+'use server'
+export async function getPostBySlug(slug: string) {
+  return SAMPLE_POSTS.find(p => p.slug === slug)
+}
+
+// 컴포넌트에서 호출
+const post = await getPostBySlug(slug)
+```
+
+## 📚 학습 경로
+
+1. **기초** — [홈](http://localhost:3000)에서 모든 패턴 네비게이션 확인
+2. **Route Group** — [About](http://localhost:3000/about), [Pricing](http://localhost:3000/pricing), [Dashboard](http://localhost:3000/dashboard)
+3. **동적 라우팅** — [Blog](http://localhost:3000/blog) → [포스트 상세](http://localhost:3000/blog/nextjs-app-router)
+4. **다단계 경로** — [Shop](http://localhost:3000/shop/electronics/phones), [Docs](http://localhost:3000/docs/routing)
+5. **병렬 라우팅** — [Feed](http://localhost:3000/feed) (피드 + 스토리 동시 렌더링)
+6. **Intercepting** — [Gallery](http://localhost:3000/gallery) (Link 클릭 시 모달, 새로고침 시 전체 페이지)
+7. **API** — [/api/hello](http://localhost:3000/api/hello) GET/POST 테스트
+
+## 🎓 각 페이지의 학습 포인트
+
+모든 예제 페이지 하단에 **RouteInfo 컴포넌트**가 있어, 현재 페이지의:
+- 라우팅 패턴 이름
+- 파일 경로 (syntax)
+- 상세 설명
+- 공식 문서 링크
+
+를 한눈에 확인할 수 있습니다.
+
+## 🛠️ 개발 명령어
+
+```bash
+# 개발 서버 시작
+pnpm dev
+
+# 빌드
+pnpm build
+
+# 프로덕션 실행
+pnpm start
+
+# 린트
+pnpm lint
+
+# 타입 체크
+pnpm type-check
+```
+
+## 🌐 테마 CSS 구조
+
+`app/globals.css`에서 테마 토큰 정의:
+
+```css
+/* Light Theme */
+:root {
+  --color-bg-primary: #ffffff;
+  --color-text-primary: #0f172a;
+  /* ... */
+}
+
+/* Dark Theme */
+.dark {
+  --color-bg-primary: #0f172a;
+  --color-text-primary: #f8fafc;
+  /* ... */
+}
+
+/* TailwindCSS 등록 */
+@theme inline {
+  --color-bg-primary: var(--color-bg-primary);
+  /* ... */
+}
+```
+
+유틸리티 클래스로 사용:
+```tsx
+<div className="bg-bg-primary text-text-primary">
+  라이트 모드: 흰 배경, 검은 텍스트
+  다크 모드: 검은 배경, 흰 텍스트 (자동 적용)
+</div>
+```
+
+## 📖 참고 자료
+
+- [Next.js 16 공식 문서](https://nextjs.org/docs/app)
+- [Routing Fundamentals](https://nextjs.org/docs/app/building-your-application/routing)
+- [Dynamic Routes](https://nextjs.org/docs/app/building-your-application/routing/dynamic-routes)
+- [Parallel Routes](https://nextjs.org/docs/app/building-your-application/routing/parallel-routes)
+- [Intercepting Routes](https://nextjs.org/docs/app/building-your-application/routing/intercepting-routes)
+- [Server Actions](https://nextjs.org/docs/app/building-your-application/data-fetching/server-actions-and-mutations)
+- [TailwindCSS v4](https://tailwindcss.com/docs)
+- [React 19](https://react.dev/blog/2024/12/05/react-19)
+
+## 🎨 커스터마이징
+
+프로젝트 구조와 컨벤션은 `CLAUDE.md`에 상세히 문서화되어 있습니다. 새로운 기능을 추가할 때 참고하세요.
+
+---
+
+이 프로젝트를 통해 Next.js 16의 모든 라우팅 패턴을 **직접 구현하고 동작을 관찰**하며 깊이 있게 학습할 수 있습니다.
