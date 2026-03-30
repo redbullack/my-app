@@ -1,3 +1,4 @@
+allowBuild: oracledb
 ignoredBuiltDependencies:
   - sharp
   - unrs-resolver
