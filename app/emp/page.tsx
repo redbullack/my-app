@@ -1,10 +1,11 @@
 /**
  * @route /emp
- * @pattern Route Handler + Client Component (data fetching via fetch)
+ * @pattern Server Action + Client Component (data fetching via Server Action)
  * @description
  * scott.emp 테이블 조회 페이지.
  * MultiSelect로 ENAME 필터를 선택하고 조회 버튼을 누르면
- * /api/emp 엔드포인트를 호출하여 결과를 <pre>로 출력한다.
+ * Server Action(fetchEmpByNames)을 직접 호출하여 결과를 <pre>로 출력한다.
+ * Route Handler(/api/emp)를 거치지 않고 서버에서 DB를 직접 조회하는 패턴이다.
  * 선택 없이 조회 시 전체 데이터를 반환한다.
  */
 'use client'
@@ -12,6 +13,7 @@
 import { useState } from 'react'
 import { Button, MultiSelect } from '@/components/control'
 import RouteInfo from '@/components/shared/RouteInfo'
+import { fetchEmpByNames } from '@/actions/emp'
 import type { Emp } from '@/types/emp'
 
 const EMP_NAMES = [
@@ -32,19 +34,27 @@ export default function EmpPage() {
     setResult(null)
 
     try {
-      const params = new URLSearchParams()
-      selectedNames.forEach(name => params.append('enames', name))
-
-      const url = `/api/emp${selectedNames.length > 0 ? `?${params.toString()}` : ''}`
-      const res = await fetch(url)
-
-      if (!res.ok) {
-        const body = await res.json() as { error?: string }
-        throw new Error(body.error ?? `HTTP ${res.status}`)
-      }
-
-      const data = await res.json() as Emp[]
+      // ── [Server Action] fetchEmpByNames 직접 호출 ──────────────────────────
+      // Route Handler(/api/emp)를 거치지 않고 Server Action을 통해 DB를 직접 조회한다.
+      // 네트워크 왕복(fetch → Route Handler → DB) 없이 서버 내부에서 바로 실행된다.
+      const data = await fetchEmpByNames(selectedNames)
       setResult(data)
+
+      // ── [Route Handler] fetch 방식 (주석 처리) ────────────────────────────
+      // const params = new URLSearchParams()
+      // selectedNames.forEach(name => params.append('enames', name))
+      //
+      // const url = `/api/emp${selectedNames.length > 0 ? `?${params.toString()}` : ''}`
+      // const res = await fetch(url)
+      //
+      // if (!res.ok) {
+      //   const body = await res.json() as { error?: string }
+      //   throw new Error(body.error ?? `HTTP ${res.status}`)
+      // }
+      //
+      // const data = await res.json() as Emp[]
+      // setResult(data)
+      // ─────────────────────────────────────────────────────────────────────
     } catch (err) {
       setError(err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.')
     } finally {
@@ -101,10 +111,10 @@ export default function EmpPage() {
         )}
 
         <RouteInfo
-          pattern="Route Handler + Client Fetch"
-          syntax="app/api/emp/route.ts + app/emp/page.tsx"
-          description="Client Component에서 fetch()로 Route Handler를 호출하고, 쿼리 파라미터로 Oracle DB WHERE IN 조건을 동적으로 구성하는 패턴입니다."
-          docsUrl="https://nextjs.org/docs/app/building-your-application/routing/route-handlers"
+          pattern="Server Action + Client Component"
+          syntax="actions/emp.ts + app/emp/page.tsx"
+          description="Client Component에서 Server Action(fetchEmpByNames)을 직접 호출하여 Oracle DB를 조회하는 패턴입니다. Route Handler를 거치지 않아 네트워크 왕복이 줄어듭니다."
+          docsUrl="https://nextjs.org/docs/app/building-your-application/data-fetching/server-actions-and-mutations"
         />
       </div>
     </main>
