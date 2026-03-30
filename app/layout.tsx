@@ -14,6 +14,7 @@
 import type { Metadata } from 'next'
 import './globals.css'
 import ThemeProvider from '@/components/layout/ThemeProvider'
+import AuthSessionProvider from '@/components/auth/SessionProvider'
 import Header from '@/components/layout/Header'
 import Footer from '@/components/layout/Footer'
 
@@ -46,12 +47,14 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
       <body className="min-h-screen flex flex-col bg-bg-primary text-text-primary">
-        <ThemeProvider>
-          <Header />
-          <main className="flex-1">{children}</main>
-          {modal}
-          <Footer />
-        </ThemeProvider>
+        <AuthSessionProvider>
+          <ThemeProvider>
+            <Header />
+            <main className="flex-1">{children}</main>
+            {modal}
+            <Footer />
+          </ThemeProvider>
+        </AuthSessionProvider>
       </body>
     </html>
   )

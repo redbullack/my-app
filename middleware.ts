@@ -1,35 +1,47 @@
 /**
- * @pattern Middleware
+ * @pattern Middleware + Authentication
  * @description
- * Next.js Middleware는 요청이 라우트에 도달하기 전에 실행된다.
- * 프로젝트 루트(또는 src/)에 middleware.ts 파일을 생성하면 자동 적용된다.
+ * Next.js Middleware에 NextAuth v5 인증 체크를 통합한다.
+ * - 보호 경로(/dashboard, /settings, /emp): 미인증 시 /login으로 리다이렉트
+ * - /login: 인증 상태면 /dashboard로 리다이렉트
+ * - 기존 커스텀 헤더(x-app-name, x-pathname) 유지
  *
- * 주요 용도:
- * - 인증/인가 체크
- * - 리다이렉트/리라이트
- * - 요청/응답 헤더 수정
- * - A/B 테스트, 지역화(i18n) 등
- *
- * config.matcher: 미들웨어가 실행될 경로 패턴을 지정한다.
- * 아래 예제는 모든 요청에 커스텀 헤더를 추가하고, 요청 정보를 로깅한다.
+ * Next.js 16에서 auth() middleware wrapper 대신 getToken()으로 JWT를 직접 검증한다.
  */
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { getToken } from 'next-auth/jwt'
 
-export function middleware(request: NextRequest) {
+const PROTECTED_PATHS = ['/dashboard', '/settings', '/emp']
+
+export async function middleware(request: NextRequest) {
+  const token = await getToken({ req: request, secret: process.env.AUTH_SECRET })
+  const { pathname } = request.nextUrl
+  const isLoggedIn = !!token
+
+  // 보호 경로: 미인증 시 /login으로 리다이렉트
+  const isProtected = PROTECTED_PATHS.some((p) => pathname.startsWith(p))
+  if (isProtected && !isLoggedIn) {
+    return NextResponse.redirect(new URL('/login', request.url))
+  }
+
+  // 로그인 상태에서 /login 접근 시 /dashboard로 리다이렉트
+  if (pathname === '/login' && isLoggedIn) {
+    return NextResponse.redirect(new URL('/dashboard', request.url))
+  }
+
   const response = NextResponse.next()
 
-  // 커스텀 응답 헤더 추가 (데모)
+  // 기존 커스텀 응답 헤더 유지
   response.headers.set('x-app-name', 'nextjs-16-lab')
-  response.headers.set('x-pathname', request.nextUrl.pathname)
+  response.headers.set('x-pathname', pathname)
 
   return response
 }
 
 /**
- * matcher: 미들웨어가 적용될 경로 패턴.
- * - /((?!_next/static|_next/image|favicon.ico).*) : 정적 파일을 제외한 모든 경로
+ * matcher: 정적 파일과 NextAuth API를 제외한 모든 경로에 적용
  */
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/auth).*)'],
 }
