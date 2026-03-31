@@ -146,7 +146,7 @@
 | Error UI | `error.tsx` | Error Boundary |
 | Not Found | `not-found.tsx` | 404 처리 |
 | Route Handler | `app/api/*/route.ts` | API 엔드포인트 |
-| Middleware | `middleware.ts` | 요청 가로채기 |
+| Proxy | `proxy.ts` | 요청 가로채기 (Next.js 16에서 middleware → proxy로 변경) |
 
 ### 4-2. 특수 파일 (Special Files)
 
