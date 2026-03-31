@@ -10,7 +10,7 @@
 
 import NextAuth from 'next-auth'
 import Credentials from 'next-auth/providers/credentials'
-import { queryOracle } from '@/lib/db/oracleClient'
+import { getDbClient } from '@/lib/db'
 import type { Emp } from '@/types/emp'
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -28,7 +28,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         // Oracle EMP 테이블에서 ENAME 조회
         const username = (credentials.username as string).toUpperCase()
-        const rows = await queryOracle<Emp>(
+        const db = getDbClient()
+        const rows = await db.query<Emp>(
           'SELECT EMPNO, ENAME, JOB FROM EMP WHERE ENAME = :username',
           [username],
         )

@@ -1,29 +1,43 @@
 /**
- * @route GET /api/emp
- * @pattern Route Handler
+ * @route POST /api/emp/[action]
+ * @pattern Dynamic Segment Route Handler ([param])
  * @description
- * scott.emp 테이블을 조회하는 API 엔드포인트.
- * 쿼리 파라미터 enames (콤마 구분 또는 반복 키)를 받아 WHERE IN 절을 동적으로 구성한다.
- * enames가 없으면 전체 조회한다.
+ * 동적 세그먼트를 사용하는 Route Handler.
+ * [action] 파라미터로 수행할 작업을 구분한다.
  *
- * 예) GET /api/emp?enames=SCOTT&enames=KING
- *     GET /api/emp  (전체 조회)
+ * 현재 지원하는 action:
+ *   - "search": POST body의 enames 배열로 scott.emp 테이블을 조회한다.
+ *
+ * 예) POST /api/emp/search
+ *     Body: { "enames": ["SCOTT", "KING"] }
+ *     Body: {} 또는 { "enames": [] }  → 전체 조회
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getDbClient } from '@/lib/db'
 import type { Emp } from '@/types/emp'
 
-export async function GET(request: NextRequest): Promise<NextResponse> {
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ action: string }> },
+): Promise<NextResponse> {
+  const { action } = await params
+
+  if (action !== 'search') {
+    return NextResponse.json(
+      { error: `Unknown action: ${action}` },
+      { status: 404 },
+    )
+  }
+
   try {
-    const { searchParams } = request.nextUrl
-    const enames = searchParams.getAll('enames')
+    const body = (await request.json()) as { enames?: string[] }
+    const enames = body.enames ?? []
 
     let sql: string
     let binds: Record<string, string>
 
     if (enames.length > 0) {
-      // 바인드 변수 동적 생성: :ename0, :ename1, ...
       const bindKeys = enames.map((_, i) => `:ename${i}`)
       const bindObj: Record<string, string> = {}
       enames.forEach((name, i) => {

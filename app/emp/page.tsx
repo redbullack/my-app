@@ -55,6 +55,25 @@ export default function EmpPage() {
       // const data = await res.json() as Emp[]
       // setResult(data)
       // ─────────────────────────────────────────────────────────────────────
+
+      // ── [Route Handler · POST] fetch 방식 (주석 처리) ────────────────────
+      // 동적 세그먼트 Route Handler(/api/emp/[action])를 사용하여 POST로 조회한다.
+      // Body에 enames 배열을 JSON으로 전달한다.
+      //
+      // const res = await fetch('/api/emp/search', {
+      //   method: 'POST',
+      //   headers: { 'Content-Type': 'application/json' },
+      //   body: JSON.stringify({ enames: selectedNames }),
+      // })
+      //
+      // if (!res.ok) {
+      //   const body = await res.json() as { error?: string }
+      //   throw new Error(body.error ?? `HTTP ${res.status}`)
+      // }
+      //
+      // const data = await res.json() as Emp[]
+      // setResult(data)
+      // ─────────────────────────────────────────────────────────────────────
     } catch (err) {
       setError(err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.')
     } finally {

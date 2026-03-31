@@ -6,7 +6,7 @@
  */
 'use server'
 
-import { queryOracle } from '@/lib/db'
+import { getDbClient } from '@/lib/db'
 import type { Emp } from '@/types/emp'
 
 /**
@@ -33,7 +33,8 @@ export async function fetchEmpByNames(enames: string[]): Promise<Emp[]> {
       binds = {}
     }
 
-    return queryOracle<Emp>(sql, binds)
+    const db = getDbClient()
+    return db.query<Emp>(sql, binds)
 
   } catch (error) {
     console.error("DB Error:", error);
