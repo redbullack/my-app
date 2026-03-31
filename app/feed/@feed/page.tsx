@@ -15,6 +15,10 @@ const FEED_ITEMS = [
 ]
 
 export default function FeedSlot() {
+  // ⚠️ [테스트용] 아래 throw 주석을 해제하면 @feed 슬롯에서 에러가 발생합니다.
+  // @stories 슬롯은 정상 동작하는 것을 확인할 수 있습니다.
+  throw new Error('[@feed] 테스트용 에러: 이 에러는 @feed 슬롯에만 영향을 줍니다!')
+  // ⚠️ [테스트용 끝]
   return (
     <div className="space-y-4">
       <h2 className="flex items-center gap-2 text-lg font-semibold text-text-primary">
