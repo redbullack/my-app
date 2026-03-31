@@ -15,7 +15,12 @@ const STORIES = [
   { id: 5, user: '준서', emoji: '📚', label: '독서' },
 ]
 
-export default function StoriesSlot() {
+// ⚠️ [테스트용] 아래 sleep + async를 주석 처리하면 로딩 없이 즉시 렌더링됩니다.
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+export default async function StoriesSlot() {
+  await sleep(3000)
+  // ⚠️ [테스트용 끝] — 원복 시 async 제거, sleep 호출 제거, 상단 sleep 함수 제거
   return (
     <div className="space-y-4">
       <h2 className="flex items-center gap-2 text-lg font-semibold text-text-primary">
