@@ -6,6 +6,7 @@
  * 현재는 'oracle'만 구현되어 있다.
  */
 
+import oracledb from 'oracledb'
 import { queryOracle } from './oracleClient'
 
 export type DbType = 'oracle'
@@ -13,7 +14,7 @@ export type DbType = 'oracle'
 export interface DbClient {
   query: <T = Record<string, unknown>>(
     sql: string,
-    binds?: unknown[],
+    binds?: oracledb.BindParameters,
   ) => Promise<T[]>
 }
 
@@ -25,7 +26,7 @@ export function getDbClient(type: DbType = 'oracle'): DbClient {
   switch (type) {
     case 'oracle':
       return {
-        query: <T = Record<string, unknown>>(sql: string, binds: unknown[] = []) =>
+        query: <T = Record<string, unknown>>(sql: string, binds: oracledb.BindParameters = []) =>
           queryOracle<T>(sql, binds),
       }
     default:
@@ -33,5 +34,3 @@ export function getDbClient(type: DbType = 'oracle'): DbClient {
   }
 }
 
-// 편의 re-export
-export { queryOracle, getOracleConnection } from './oracleClient'

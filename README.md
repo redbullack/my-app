@@ -240,11 +240,12 @@ const post = await getPostBySlug(slug)
 
 ### Database Integration (Oracle)
 ```tsx
-// lib/db/oracleClient.ts
-import { queryOracle } from '@/lib/db'
+// getDbClient() 팩토리를 통해 DB 접근 (직접 queryOracle 호출 금지)
+import { getDbClient } from '@/lib/db'
 import type { Emp } from '@/types/emp'
 
-const emps = await queryOracle<Emp>(
+const db = getDbClient()
+const emps = await db.query<Emp>(
   'SELECT * FROM scott.emp WHERE ENAME IN (:ename0, :ename1)',
   { ename0: 'SCOTT', ename1: 'KING' }
 )

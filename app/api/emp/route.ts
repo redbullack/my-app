@@ -11,7 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { queryOracle } from '@/lib/db'
+import { getDbClient } from '@/lib/db'
 import type { Emp } from '@/types/emp'
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -37,7 +37,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       binds = {}
     }
 
-    const rows = await queryOracle<Emp>(sql, binds)
+    const db = getDbClient()
+    const rows = await db.query<Emp>(sql, binds)
 
     return NextResponse.json(rows)
   } catch (error) {
