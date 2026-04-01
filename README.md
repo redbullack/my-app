@@ -97,6 +97,9 @@ import { Button, Input, Select, Panel, Badge, Modal, MultiSelect, Tab, TabSub } 
 
 ### Layout 컴포넌트
 - **Header** — 전역 네비게이션 + 테마 토글
+  - Overflow Nav: ResizeObserver 기반 반응형 네비게이션 (좁은 화면에서 자동으로 드롭다운 "더보기" 표시)
+  - 오프스크린 측정 컨테이너로 정확한 너비 계산
+  - 로고 + 네비게이션을 하나의 flex 그룹으로 묶어 우측 액션 영역과 명확히 분리
 - **Footer** — 참고 링크 및 프로젝트 정보
 - **Sidebar** — 대시보드 레이아웃용 (Route Group 데모)
 - **ThemeProvider** — Context API 기반 테마 관리
