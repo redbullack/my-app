@@ -15,6 +15,8 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Docs', href: '/docs', description: 'Optional Catch-all [[...slug]]' },
   { label: 'Feed', href: '/feed', description: 'Parallel Routes @slot' },
   { label: 'Gallery', href: '/gallery', description: 'Intercepting Routes (.)' },
+  { label: 'Emp', href: '/emp', description: 'Emp' },
+  { label: 'Tabs', href: '/tabs', description: 'tabs' },
 ]
 
 /** 샘플 블로그 데이터 */
