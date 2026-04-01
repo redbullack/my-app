@@ -17,6 +17,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Gallery', href: '/gallery', description: 'Intercepting Routes (.)' },
   { label: 'Emp', href: '/emp', description: 'Emp' },
   { label: 'Tabs', href: '/tabs', description: 'tabs' },
+  { label: 'Search', href: '/search', description: 'Virtualization + SearchPanel' },
 ]
 
 /** 샘플 블로그 데이터 */
