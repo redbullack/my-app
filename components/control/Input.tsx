@@ -98,15 +98,28 @@ function InputSelect({
 }: InputSelectProps) {
   const inputId = id ?? label?.toLowerCase().replace(/\s+/g, '-')
   const [isOpen, setIsOpen] = useState(false)
+  const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
+  const [localValue, setLocalValue] = useState<string[]>(value)
+  const [focusedIndex, setFocusedIndex] = useState(-1)
+  const [focusTarget, setFocusTarget] = useState<'search' | 'list'>('search')
   const containerRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  /* 외부 value가 변경되면 localValue 동기화 (드롭다운 닫혀있을 때) */
+  useEffect(() => {
+    if (!isOpen) {
+      setLocalValue(value)
+    }
+  }, [value, isOpen])
 
   const filtered = search
     ? dataSource.filter(opt =>
-        opt.label.toLowerCase().includes(search.toLowerCase()) ||
-        opt.value.toLowerCase().includes(search.toLowerCase())
-      )
+      opt.label.toLowerCase().includes(search.toLowerCase()) ||
+      opt.value.toLowerCase().includes(search.toLowerCase())
+    )
     : dataSource
 
   const virtualizer = useVirtualizer({
@@ -117,44 +130,118 @@ function InputSelect({
   })
 
   const toggle = useCallback((optValue: string) => {
-    if (!onChange) return
-    if (value.includes(optValue)) {
-      onChange(value.filter(v => v !== optValue))
-    } else {
-      onChange([...value, optValue])
-    }
-  }, [value, onChange])
+    setLocalValue(prev =>
+      prev.includes(optValue) ? prev.filter(v => v !== optValue) : [...prev, optValue]
+    )
+  }, [])
 
   const toggleAll = useCallback(() => {
-    if (!onChange) return
     const filteredValues = filtered.map(o => o.value)
-    const allFilteredSelected = filteredValues.every(v => value.includes(v))
-    if (allFilteredSelected) {
-      onChange(value.filter(v => !filteredValues.includes(v)))
-    } else {
-      const merged = new Set([...value, ...filteredValues])
-      onChange(Array.from(merged))
+    setLocalValue(prev => {
+      const allFilteredSelected = filteredValues.every(v => prev.includes(v))
+      if (allFilteredSelected) {
+        return prev.filter(v => !filteredValues.includes(v))
+      }
+      return Array.from(new Set([...prev, ...filteredValues]))
+    })
+  }, [filtered])
+
+  /** 드롭다운을 닫고, 변경이 있으면 부모에게 onChange 전달 */
+  const localValueRef = useRef(localValue)
+  localValueRef.current = localValue
+
+  const closeDropdown = useCallback(() => {
+    setIsOpen(false)
+    const snapshot = localValueRef.current
+    if (onChange && (snapshot.length !== value.length || snapshot.some((v, i) => v !== value[i]))) {
+      queueMicrotask(() => onChange(snapshot))
     }
-  }, [value, onChange, filtered])
+  }, [onChange, value])
+
+  /** 드롭다운 열기: localValue를 현재 value로 동기화, 검색 초기화 */
+  const openDropdown = useCallback(() => {
+    setLocalValue(value)
+    setSearchInput('')
+    setSearch('')
+    setFocusedIndex(-1)
+    setFocusTarget('search')
+    setIsOpen(true)
+  }, [value])
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setIsOpen(false)
+        if (isOpen) closeDropdown()
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
+  }, [isOpen, closeDropdown])
 
-  const selectedLabels = value.length > 0
-    ? value.length <= 3
-      ? dataSource.filter(o => value.includes(o.value)).map(o => o.label).join(', ')
-      : `${value.length}건 선택됨`
+  /** 검색 input 키보드 핸들러 — 모든 키 이벤트의 버블링을 차단하여 리스트 핸들러와 분리 */
+  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent) => {
+    e.stopPropagation()
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      setSearch(searchInput)
+      setFocusedIndex(0)
+      setFocusTarget('list')
+      listRef.current?.focus()
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      closeDropdown()
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+      e.preventDefault()
+      setFocusedIndex(0)
+      setFocusTarget('list')
+      listRef.current?.focus()
+    }
+  }, [searchInput, closeDropdown])
+
+  /** 리스트 키보드 핸들러 — listRef에 직접 바인딩, 검색 input과 독립 */
+  const handleListKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (focusTarget !== 'list') return
+    const len = filtered.length
+    if (len === 0) return
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+      e.preventDefault()
+      const next = (focusedIndex + 1) % len
+      setFocusedIndex(next)
+      virtualizer.scrollToIndex(next)
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+      e.preventDefault()
+      const prev = (focusedIndex - 1 + len) % len
+      setFocusedIndex(prev)
+      virtualizer.scrollToIndex(prev)
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const opt = filtered[focusedIndex]
+      if (opt) toggle(opt.value)
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      closeDropdown()
+    } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+      /* 글자 입력 시 검색 모드로 복귀 */
+      setFocusTarget('search')
+      setFocusedIndex(-1)
+      searchInputRef.current?.focus()
+    }
+  }, [focusTarget, focusedIndex, filtered, virtualizer, toggle, closeDropdown])
+
+  /* 드롭다운 열림/닫힘에 따라 표시할 라벨 결정 */
+  const displayValue = isOpen ? localValue : value
+  const selectedLabels = displayValue.length > 0
+    ? displayValue.length <= 3
+      ? dataSource.filter(o => displayValue.includes(o.value)).map(o => o.label).join(', ')
+      : `${displayValue.length}건 선택됨`
     : ''
 
   return (
-    <div className={cn('relative flex flex-col gap-1.5', className)} ref={containerRef}>
+    <div
+      className={cn('relative flex flex-col gap-1.5', className)}
+      ref={containerRef}
+    >
       {label && (
         <label htmlFor={inputId} className="text-sm font-medium text-text-primary">
           {label}
@@ -164,12 +251,16 @@ function InputSelect({
         id={inputId}
         type="button"
         disabled={disabled}
-        onClick={() => !disabled && setIsOpen(!isOpen)}
+        onClick={() => {
+          if (disabled) return
+          if (isOpen) closeDropdown()
+          else openDropdown()
+        }}
         className={cn(
           'flex items-center justify-between rounded-lg border bg-bg-primary px-3 py-2 text-sm text-left transition-colors min-h-[38px]',
           'focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent',
           error ? 'border-error' : 'border-border',
-          disabled ? 'opacity-50 cursor-not-allowed bg-bg-tertiary' : value.length > 0 ? 'text-text-primary' : 'text-text-muted',
+          disabled ? 'opacity-50 cursor-not-allowed bg-bg-tertiary' : displayValue.length > 0 ? 'text-text-primary' : 'text-text-muted',
         )}
       >
         <span className="truncate">{selectedLabels || '선택하세요'}</span>
@@ -183,13 +274,15 @@ function InputSelect({
 
       {isOpen && (
         <div className="absolute top-full left-0 z-50 mt-1 w-full rounded-lg border border-border bg-bg-primary shadow-lg">
-          {/* 검색 필터 */}
+          {/* 검색 필터 (Enter로 확정) */}
           <div className="border-b border-border p-2">
             <input
+              ref={searchInputRef}
               type="text"
-              placeholder="검색..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
+              placeholder="검색 후 Enter..."
+              value={searchInput}
+              onChange={e => setSearchInput(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
               className="w-full rounded border border-border bg-bg-secondary px-2 py-1 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50"
               autoFocus
             />
@@ -200,11 +293,11 @@ function InputSelect({
             <label className="flex cursor-pointer items-center gap-2 select-none">
               <input
                 type="checkbox"
-                checked={filtered.length > 0 && filtered.every(o => value.includes(o.value))}
+                checked={filtered.length > 0 && filtered.every(o => localValue.includes(o.value))}
                 ref={el => {
                   if (el) {
                     const filteredValues = filtered.map(o => o.value)
-                    const selectedCount = filteredValues.filter(v => value.includes(v)).length
+                    const selectedCount = filteredValues.filter(v => localValue.includes(v)).length
                     el.indeterminate = selectedCount > 0 && selectedCount < filtered.length
                   }
                 }}
@@ -212,22 +305,28 @@ function InputSelect({
                 className="h-4 w-4 rounded accent-accent cursor-pointer"
               />
               <span className="text-xs font-medium text-text-secondary">
-                전체 선택 ({value.length}/{dataSource.length})
+                전체 선택 ({localValue.length}/{dataSource.length})
               </span>
             </label>
           </div>
 
           {/* 가상화된 옵션 리스트 */}
           <div
-            ref={scrollRef}
-            className="max-h-60 overflow-auto"
+            ref={(el) => {
+              scrollRef.current = el
+              listRef.current = el
+            }}
+            tabIndex={-1}
+            onKeyDown={handleListKeyDown}
+            className="max-h-60 overflow-auto focus:outline-none"
           >
             <div
               style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative', width: '100%' }}
             >
               {virtualizer.getVirtualItems().map(virtualItem => {
                 const opt = filtered[virtualItem.index]
-                const isSelected = value.includes(opt.value)
+                const isSelected = localValue.includes(opt.value)
+                const isFocused = virtualItem.index === focusedIndex
                 return (
                   <div
                     key={virtualItem.key}
@@ -241,12 +340,21 @@ function InputSelect({
                     }}
                   >
                     <label
-                      className="flex cursor-pointer items-center gap-2 px-3 h-full select-none hover:bg-bg-tertiary transition-colors"
+                      className={cn(
+                        'flex cursor-pointer items-center gap-2 px-3 h-full select-none transition-colors',
+                        isFocused ? 'bg-accent/10 ring-1 ring-inset ring-accent/30' : 'hover:bg-bg-tertiary',
+                      )}
+                      onMouseDown={() => {
+                        setFocusedIndex(virtualItem.index)
+                        setFocusTarget('list')
+                        listRef.current?.focus()
+                      }}
                     >
                       <input
                         type="checkbox"
                         checked={isSelected}
                         onChange={() => toggle(opt.value)}
+                        tabIndex={-1}
                         className="h-3.5 w-3.5 rounded accent-accent cursor-pointer"
                       />
                       <span className="text-sm text-text-primary truncate">{opt.label}</span>
