@@ -14,8 +14,8 @@ import { Button, Input, Panel } from '@/components/control'
 
 export default function LoginForm() {
   const router = useRouter()
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
+  const [username, setUsername] = useState('SMITH')
+  const [password, setPassword] = useState('password123')
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
