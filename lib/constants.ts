@@ -18,6 +18,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Emp', href: '/emp', description: 'Emp' },
   { label: 'Tabs', href: '/tabs', description: 'tabs' },
   { label: 'Search', href: '/search', description: 'Virtualization + SearchPanel' },
+  { label: 'CompSearch', href: '/comp-search', description: 'useTransition + CompGrid/CompChart' },
 ]
 
 /** 샘플 블로그 데이터 */
