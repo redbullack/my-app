@@ -47,3 +47,12 @@ export interface NavItem {
   href: string
   description?: string
 }
+
+/** CompGrid 컬럼 설정 */
+export interface GridColumn {
+  key: string
+  label: string
+  width: string
+  align?: 'left' | 'right' | 'center'
+  render?: (value: unknown, row: Record<string, unknown>) => React.ReactNode
+}

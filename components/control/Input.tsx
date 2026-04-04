@@ -8,12 +8,15 @@
  */
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useTransition } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { cn } from '@/lib/utils'
 import type { SelectOption } from '@/types'
 
 type InputType = 'text' | 'password' | 'email' | 'number' | 'search' | 'select'
+
+/** dataSource를 지연 로딩하는 함수 타입 (Server Action .bind() 등) */
+export type DataSourceFn = () => Promise<SelectOption[]>
 
 interface InputBaseProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'value' | 'onChange'> {
   type?: InputType
@@ -33,7 +36,7 @@ interface InputSelectProps extends InputBaseProps {
   type: 'select'
   value?: string[]
   onChange?: (selected: string[]) => void
-  dataSource?: SelectOption[]
+  dataSource?: SelectOption[] | DataSourceFn
   disabled?: boolean
 }
 
@@ -93,7 +96,7 @@ function InputSelect({
   id,
   value = [],
   onChange,
-  dataSource = [],
+  dataSource,
   disabled = false,
 }: InputSelectProps) {
   const inputId = id ?? label?.toLowerCase().replace(/\s+/g, '-')
@@ -108,6 +111,25 @@ function InputSelect({
   const searchInputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
+  /* ── 함수형 dataSource 지연 로딩 ── */
+  const isDataSourceFn = typeof dataSource === 'function'
+  const [resolvedOptions, setResolvedOptions] = useState<SelectOption[]>([])
+  const [isFetching, startFetchTransition] = useTransition()
+  const fetchedFnRef = useRef<DataSourceFn | null>(null)
+
+  /* bind() 파라미터 변경 → 함수 참조가 바뀌면 캐시 무효화 */
+  useEffect(() => {
+    if (isDataSourceFn && fetchedFnRef.current !== dataSource) {
+      setResolvedOptions([])
+      fetchedFnRef.current = null
+    }
+  }, [dataSource, isDataSourceFn])
+
+  /** 배열이면 그대로, 함수면 resolve된 결과 사용 */
+  const options: SelectOption[] = isDataSourceFn
+    ? resolvedOptions
+    : (dataSource as SelectOption[] | undefined) ?? []
+
   /* 외부 value가 변경되면 localValue 동기화 (드롭다운 닫혀있을 때) */
   useEffect(() => {
     if (!isOpen) {
@@ -116,11 +138,11 @@ function InputSelect({
   }, [value, isOpen])
 
   const filtered = search
-    ? dataSource.filter(opt =>
+    ? options.filter(opt =>
       opt.label.toLowerCase().includes(search.toLowerCase()) ||
       opt.value.toLowerCase().includes(search.toLowerCase())
     )
-    : dataSource
+    : options
 
   const virtualizer = useVirtualizer({
     count: filtered.length,
@@ -166,7 +188,17 @@ function InputSelect({
     setFocusedIndex(-1)
     setFocusTarget('search')
     setIsOpen(true)
-  }, [value])
+
+    /* 함수형 dataSource: 아직 fetch하지 않았거나 함수 참조가 바뀌었으면 호출 */
+    if (isDataSourceFn && fetchedFnRef.current !== dataSource) {
+      const fn = dataSource as DataSourceFn
+      startFetchTransition(async () => {
+        const result = await fn()
+        setResolvedOptions(result)
+        fetchedFnRef.current = fn
+      })
+    }
+  }, [value, isDataSourceFn, dataSource])
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -233,7 +265,7 @@ function InputSelect({
   const displayValue = isOpen ? localValue : value
   const selectedLabels = displayValue.length > 0
     ? displayValue.length <= 3
-      ? dataSource.filter(o => displayValue.includes(o.value)).map(o => o.label).join(', ')
+      ? options.filter(o => displayValue.includes(o.value)).map(o => o.label).join(', ')
       : `${displayValue.length}건 선택됨`
     : ''
 
@@ -305,7 +337,7 @@ function InputSelect({
                 className="h-4 w-4 rounded accent-accent cursor-pointer"
               />
               <span className="text-xs font-medium text-text-secondary">
-                전체 선택 ({localValue.length}/{dataSource.length})
+                전체 선택 ({localValue.length}/{options.length})
               </span>
             </label>
           </div>
@@ -365,7 +397,12 @@ function InputSelect({
             </div>
           </div>
 
-          {filtered.length === 0 && (
+          {isFetching && (
+            <div className="px-3 py-4 text-center text-sm text-text-muted animate-pulse">
+              데이터를 불러오는 중...
+            </div>
+          )}
+          {!isFetching && filtered.length === 0 && (
             <div className="px-3 py-4 text-center text-sm text-text-muted">
               검색 결과가 없습니다
             </div>
