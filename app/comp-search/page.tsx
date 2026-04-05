@@ -88,6 +88,10 @@ export default function CompSearchPage() {
   const [isGridPending, setIsGridPending] = useState(false)
   const [isChartPending, setIsChartPending] = useState(false)
 
+  /* ── 에러 상태: 렌더링 중 throw하여 error.tsx(Error Boundary)로 전파 ── */
+  const [fatalError, setFatalError] = useState<Error | null>(null)
+  if (fatalError) throw fatalError
+
   /* ── Race condition 방지 ── */
   const fetchIdRef = useRef<{ C: number; grid: number; chart: number }>({ C: 0, grid: 0, chart: 0 })
 
@@ -107,7 +111,7 @@ export default function CompSearchPage() {
   //   [condValues.itemA],
   // )
   const itemBFetcher = useMemo(() => {
-    console.log(`itemBFetcher: ${condValues.itemA.map((v) => v)}`);
+    console.log(`CLIENT: itemBFetcher: condValues: ${condValues.itemA.map((v) => v)}`);
     return fetchItemDataSource.bind(null, 'B', condValues.itemA)
   }, [condValues.itemA])
 
@@ -168,20 +172,33 @@ export default function CompSearchPage() {
      *   먼저 완료된 쪽부터 즉시 화면에 반영된다. */
     const gridId = ++fetchIdRef.current.grid
     setIsGridPending(true)
-    fetchSearchResults(itemA, itemB, itemC).then((data) => {
-      if (fetchIdRef.current.grid === gridId) {
-        setGridData(data)
-        setIsGridPending(false)
-      }
-    })
+    fetchSearchResults(itemA, itemB, itemC)
+      .then((data) => {
+        if (fetchIdRef.current.grid === gridId) {
+          setGridData(data)
+        }
+      })
+      .catch((e) => setFatalError(e instanceof Error ? e : new Error(String(e))))
+      .finally(() => {
+        if (fetchIdRef.current.grid === gridId) {
+          setIsGridPending(false)
+        }
+      })
+
     const chartId = ++fetchIdRef.current.chart
     setIsChartPending(true)
-    fetchChartData(itemA, itemB, itemC).then((data) => {
-      if (fetchIdRef.current.chart === chartId) {
-        setChartData(data)
-        setIsChartPending(false)
-      }
-    })
+    fetchChartData(itemA, itemB, itemC)
+      .then((data) => {
+        if (fetchIdRef.current.chart === chartId) {
+          setChartData(data)
+        }
+      })
+      .catch((e) => setFatalError(e instanceof Error ? e : new Error(String(e))))
+      .finally(() => {
+        if (fetchIdRef.current.chart === chartId) {
+          setIsChartPending(false)
+        }
+      })
 
     /* ▸ 방법 2) Route Handler fetch + useTransition (동일하게 배칭됨) */
     // startGridTransition(async () => {
