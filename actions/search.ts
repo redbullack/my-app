@@ -73,6 +73,9 @@ async function fetchItemA(): Promise<SelectOption[]> {
 
 /** ITEM-B 지역 데이터소스 (최대 2,000건) — selectedA 기반 */
 async function fetchItemB(selectedA?: string[]): Promise<SelectOption[]> {
+  await new Promise(resolve => setTimeout(resolve, 1000))
+  console.log(`SERVER: fetchItemB: selectedA: ${selectedA?.map((v) => v)}`);
+
   const count = selectedA && selectedA.length > 0
     ? Math.min(2000, selectedA.length * 200)
     : 2000
@@ -93,6 +96,9 @@ async function fetchItemB(selectedA?: string[]): Promise<SelectOption[]> {
 
 /** ITEM-C 브랜드 데이터소스 (최대 1,500건) — selectedA + selectedB 기반 */
 async function fetchItemC(condition?: string[]): Promise<SelectOption[]> {
+
+  console.log(`SERVER: fetchItemC: condition: ${condition?.map((v) => v)}`);
+
   const count = condition && condition.length > 0
     ? Math.min(1500, condition.length * 100)
     : 1500
@@ -157,8 +163,8 @@ export async function fetchChartData(
     Math.max(10000, (selectedA.length || 10) * (selectedB.length || 10) * (selectedC.length || 5) * 20),
   )
 
-  await new Promise(resolve => setTimeout(resolve, 5000))
-
+  await new Promise(resolve => setTimeout(resolve, 2000))
+  throw new Error('데이터를 불러오는 데 실패했습니다.');
   return db.query<ChartDataRow>(`
     SELECT
       s."label",
