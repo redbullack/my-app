@@ -96,3 +96,63 @@ React 19의 useTransition은 concurrent feature로, 진행 중인 transition 렌
 	- window, document 등 브라우저 API / 사용 가능
 	- 브라우저로 코드가 전송되지 않아 아주 가벼움 / 무거워질 수 있음
 	- Next.js는 SEO와 초기 로딩 속도를 위해 CC도 일단 서버에서 HTML로 미리 pre-rendering 후, 브라우저에서 JS와 연결되며 hydration (활성화) 되는 것.
+
+- proxy.ts
+    1. Rate Limiting (요청 제한)
+    IP 또는 사용자 기준으로 단위 시간당 요청 수를 제한합니다. DDoS/brute-force 방어의 첫 번째 방어선입니다.
+
+    // IP별 요청 카운트를 외부 스토어(Redis 등)에서 확인
+    const ip = request.headers.get('x-forwarded-for')
+    const rateLimit = await checkRateLimit(ip)
+    if (rateLimit.exceeded) {
+    return new NextResponse('Too Many Requests', { status: 429 })
+    }
+
+    2. RBAC (역할 기반 접근 제어)
+    단순 인증 여부가 아니라 역할/권한별 경로 제한을 처리합니다. 예: /admin은 ADMIN 역할만 접근.
+
+    const adminPaths = ['/admin', '/emp/manage']
+    if (adminPaths.some(p => pathname.startsWith(p)) && token?.role !== 'ADMIN') {
+    return NextResponse.redirect(new URL('/403', request.url))
+    }
+
+    3. 지역화 / i18n 라우팅
+    Accept-Language 헤더나 쿠키를 기반으로 locale prefix(/ko, /en)를 자동 리다이렉트합니다.
+
+    const locale = request.cookies.get('NEXT_LOCALE')?.value
+    || negotiateLocale(request.headers.get('accept-language'))
+    if (!pathname.startsWith(`/${locale}`)) {
+    return NextResponse.redirect(new URL(`/${locale}${pathname}`, request.url))
+    }
+
+    4. Bot / Crawler 감지
+    User-Agent를 분석해 SEO 크롤러에게는 별도 처리(예: prerendered 페이지 서빙)를 하거나, 악성 봇을 차단합니다.
+
+    5. A/B 테스트 / Feature Flag
+    쿠키 기반으로 사용자를 실험 그룹에 할당하고 다른 경로로 rewrite합니다.
+
+    const bucket = request.cookies.get('ab-bucket')?.value || assignBucket()
+    const response = NextResponse.rewrite(new URL(`/experiment/${bucket}${pathname}`, request.url))
+    response.cookies.set('ab-bucket', bucket)
+    return response
+
+    6. 보안 헤더 주입
+    OWASP 권장 보안 헤더를 일괄 적용합니다.
+
+    response.headers.set('X-Frame-Options', 'DENY')
+    response.headers.set('X-Content-Type-Options', 'nosniff')
+    response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
+    response.headers.set('Permissions-Policy', 'camera=(), microphone=()')
+    // CSP는 nonce 기반으로 설정하는 경우가 많음
+
+    7. 로깅 / 트레이싱
+    요청 시작 시점에 correlation ID를 생성해 헤더에 심어두면, 이후 서버 컴포넌트·API 라우트에서 추적이 가능합니다.
+
+    const requestId = crypto.randomUUID()
+    response.headers.set('x-request-id', requestId)
+    
+    8. Geo-based 라우팅 / 리다이렉트
+    Vercel 등 플랫폼이 제공하는 request.geo 정보를 활용해 국가별 서비스 분기 또는 차단을 수행합니다.
+
+    9. 유지보수 모드
+    특정 플래그(환경변수/리모트 설정)가 켜지면 전체 트래픽을 유지보수 페이지로 rewrite합니다.
