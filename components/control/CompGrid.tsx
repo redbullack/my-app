@@ -87,6 +87,13 @@ interface CompGridProps {
   overscan?: number
   emptyMessage?: string
   className?: string
+  /** 셀 더블클릭 이벤트 (옵션). 핸들러가 있으면 셀에 cursor-pointer가 적용된다. */
+  onCellDoubleClick?: (
+    value: unknown,
+    column: GridColumn,
+    row: Record<string, unknown>,
+    rowIndex: number,
+  ) => void
 }
 
 function CompGrid({
@@ -98,6 +105,7 @@ function CompGrid({
   overscan = 20,
   emptyMessage = '조건을 선택하고 Search 버튼을 클릭하세요',
   className,
+  onCellDoubleClick,
 }: CompGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -194,8 +202,14 @@ function CompGrid({
                         'px-3 text-xs text-text-primary shrink-0 truncate',
                         col.align === 'right' && 'text-right',
                         col.align === 'center' && 'text-center',
+                        onCellDoubleClick && 'cursor-pointer select-none',
                       )}
                       style={{ width: col.width }}
+                      onDoubleClick={
+                        onCellDoubleClick
+                          ? () => onCellDoubleClick(value, col, row, virtualRow.index)
+                          : undefined
+                      }
                     >
                       {col.render ? col.render(value, row) : String(value ?? '')}
                     </div>

@@ -15,8 +15,25 @@ import type { SelectOption } from '@/types'
 
 type InputType = 'text' | 'password' | 'email' | 'number' | 'search' | 'select'
 
-/** dataSource를 지연 로딩하는 함수 타입 (Server Action .bind() 등) */
-export type DataSourceFn = () => Promise<SelectOption[]>
+/**
+ * dataSource를 지연 로딩하는 함수 타입 (Server Action .bind() 등).
+ * SelectOption[] 또는 string[] 둘 다 반환 가능. string[]는 내부에서
+ * `{ value, label }` 동일 문자열로 정규화된다.
+ */
+export type DataSourceFn =
+  | (() => Promise<SelectOption[]>)
+  | (() => Promise<string[]>)
+
+/** Input에 직접 넘길 수 있는 dataSource의 모든 형태 */
+export type DataSource = SelectOption[] | string[] | DataSourceFn
+
+/** string[] | SelectOption[] → SelectOption[]로 정규화 */
+function normalizeOptions(raw: SelectOption[] | string[] | undefined): SelectOption[] {
+  if (!raw || raw.length === 0) return []
+  return typeof raw[0] === 'string'
+    ? (raw as string[]).map(s => ({ value: s, label: s }))
+    : (raw as SelectOption[])
+}
 
 interface InputBaseProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'value' | 'onChange'> {
   type?: InputType
@@ -35,8 +52,9 @@ interface InputTextProps extends InputBaseProps {
 interface InputSelectProps extends InputBaseProps {
   type: 'select'
   value?: string[]
-  onChange?: (selected: string[]) => void
-  dataSource?: SelectOption[] | DataSourceFn
+  /** select 값 변경 콜백. 두 번째 인자로 Input의 id가 함께 전달되어 단일 핸들러에서 분기할 수 있다. */
+  onChange?: (selected: string[], id?: string) => void
+  dataSource?: DataSource
   disabled?: boolean
 }
 
@@ -113,6 +131,7 @@ function InputSelect({
 
   /* ── 함수형 dataSource 지연 로딩 ── */
   const isDataSourceFn = typeof dataSource === 'function'
+  // console.log(`CLIENT: Input.tsx - inputId: ${inputId} isDataSourceFn: ${typeof dataSource === 'function'}`)
   const [resolvedOptions, setResolvedOptions] = useState<SelectOption[]>([])
   const [isFetching, startFetchTransition] = useTransition()
   const fetchedFnRef = useRef<DataSourceFn | null>(null)
@@ -125,10 +144,10 @@ function InputSelect({
     }
   }, [dataSource, isDataSourceFn])
 
-  /** 배열이면 그대로, 함수면 resolve된 결과 사용 */
+  /** 배열이면 정규화, 함수면 resolve된 결과 사용 (resolvedOptions는 이미 정규화 완료 상태) */
   const options: SelectOption[] = isDataSourceFn
     ? resolvedOptions
-    : (dataSource as SelectOption[] | undefined) ?? []
+    : normalizeOptions(dataSource as SelectOption[] | string[] | undefined)
 
   /* 외부 value가 변경되면 localValue 동기화 (드롭다운 닫혀있을 때) */
   useEffect(() => {
@@ -176,9 +195,9 @@ function InputSelect({
     setIsOpen(false)
     const snapshot = localValueRef.current
     if (onChange && (snapshot.length !== value.length || snapshot.some((v, i) => v !== value[i]))) {
-      queueMicrotask(() => onChange(snapshot))
+      queueMicrotask(() => onChange(snapshot, id))
     }
-  }, [onChange, value])
+  }, [onChange, value, id])
 
   /** 드롭다운 열기: localValue를 현재 value로 동기화, 검색 초기화 */
   const openDropdown = useCallback(() => {
@@ -194,7 +213,8 @@ function InputSelect({
       const fn = dataSource as DataSourceFn
       startFetchTransition(async () => {
         const result = await fn()
-        setResolvedOptions(result)
+        /* result는 SelectOption[] 또는 string[] — 정규화하여 저장 */
+        setResolvedOptions(normalizeOptions(result))
         fetchedFnRef.current = fn
       })
     }
