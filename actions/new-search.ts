@@ -12,10 +12,10 @@
  *    타입과 SQL을 따로 두는 편이 명확하다.
  */
 
-import { getDbClient } from '@/lib/db'
+import { getDb, DbError } from '@/lib/db'
 import type { SelectOption } from '@/types'
 
-const db = getDbClient()
+const db = getDb("MAIN")
 
 /* ── 타입 ── */
 
@@ -158,6 +158,7 @@ export async function fetchNewSearchGrid(
   cond: NewSearchCond,
 ): Promise<NewSearchRow[]> {
   // await new Promise(resolve => setTimeout(resolve, 600))
+  // throw new Error('SERVER: 수동 에러 ! 데이터를 불러오는 데 실패했습니다.');
 
   console.log(`SERVER: fetchNewSearchGrid - cond.i1: ${cond.i1.map(v => v).join(',')}`)
   console.log(`SERVER: fetchNewSearchGrid - cond.i2: ${cond.i2.map(v => v).join(',')}`)
@@ -196,7 +197,7 @@ export async function fetchNewSearchGrid(
       ) AS "status",
       '2026-' || LPAD(MOD(LEVEL - 1, 12) + 1, 2, '0')
         || '-' || LPAD(MOD(LEVEL - 1, 28) + 1, 2, '0') AS "createdAt"
-    FROM DUAL
+    FROM DUAL999999
     CONNECT BY LEVEL <= :totalCount
     `,
     { i1c, i2c, i3c, i4c, totalCount },

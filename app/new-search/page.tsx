@@ -28,6 +28,7 @@ import {
     Panel,
 } from '@/components/control'
 import RouteInfo from '@/components/shared/RouteInfo'
+import { ErrorBoundary } from '@/components/shared/ErrorBoundary'
 import {
     fetchInput2Options,
     fetchInput3Options,
@@ -74,6 +75,21 @@ const I1_STATIC_OPTIONS: string[] = ['옵션1', '옵션2', '옵션3', '옵션4',
 type ChartActionPayload =
     | { type: 'SEARCH'; cond: NewSearchCond }
     | { type: 'CELL_DOUBLE_CLICK'; key: string; value: unknown }
+
+/* ────────────────────────────────────────────────────────────
+ * 비동기 Action 상태 타입 (에러 격리를 위한 래핑)
+ * - fetch 실패 시 이전 데이터를 유지하면서 에러 메시지를 함께 보관한다.
+ * - 그리드/차트가 서로 독립적으로 에러 상태를 가질 수 있어야
+ *   한쪽이 실패해도 다른 쪽은 정상 렌더된다.
+ * ────────────────────────────────────────────────────────────*/
+interface GridState {
+    data: NewSearchRow[]
+    error: string | null
+}
+interface ChartState {
+    data: NewChartRow[]
+    error: string | null
+}
 
 /* ────────────────────────────────────────────────────────────
  * 그리드 컬럼 정의 (이전과 동일)
@@ -193,35 +209,44 @@ export default function NewSearchPage() {
 
     /* ── 4. [React 19 표준] useActionState를 통한 데이터 페칭 ── */
 
-    // Grid 결과 관리
-    const [gridData, dispatchGrid, isGridPending] = useActionState<NewSearchRow[], NewSearchCond>(
+    // Grid 결과 관리 — 에러를 상태에 포함해 차트 영역과 격리
+    const [gridState, dispatchGrid, isGridPending] = useActionState<GridState, NewSearchCond>(
         async (prevState, currentCond) => {
             try {
-                return await fetchNewSearchGrid(currentCond)
+                const data = await fetchNewSearchGrid(currentCond)
+                return { data, error: null }
             } catch (error) {
                 console.error("Grid Fetch Error:", error)
-                return prevState // 에러 시 이전 데이터 유지 (필요에 따라 Error Boundary로 던질 수도 있음)
+                return {
+                    data: prevState.data, // 이전 데이터 유지
+                    error: error instanceof Error ? error.message : '그리드 조회 실패',
+                }
             }
         },
-        [] // 초기 데이터
+        { data: [], error: null }
     )
 
     // Chart 결과 관리 (검색 조건 OR 셀 더블클릭 모두 처리)
-    const [chartData, dispatchChart, isChartPending] = useActionState<NewChartRow[], ChartActionPayload>(
+    const [chartState, dispatchChart, isChartPending] = useActionState<ChartState, ChartActionPayload>(
         async (prevState, payload) => {
             try {
                 if (payload.type === 'SEARCH') {
-                    return await fetchNewSearchChart(payload.cond)
+                    const data = await fetchNewSearchChart(payload.cond)
+                    return { data, error: null }
                 } else if (payload.type === 'CELL_DOUBLE_CLICK') {
-                    return await fetchChartByCell(payload.key, payload.value)
+                    const data = await fetchChartByCell(payload.key, payload.value)
+                    return { data, error: null }
                 }
                 return prevState
             } catch (error) {
                 console.error("Chart Fetch Error:", error)
-                return prevState
+                return {
+                    data: prevState.data,
+                    error: error instanceof Error ? error.message : '차트 조회 실패',
+                }
             }
         },
-        []
+        { data: [], error: null }
     )
 
     function handleSearchClick() {
@@ -355,24 +380,47 @@ export default function NewSearchPage() {
                         <Panel variant="outlined">
                             <Tab activeIndex={activeTab} onChangeIndex={setActiveTab}>
                                 <TabSub label="검색 결과 (Grid)">
-                                    <CompGrid
-                                        columns={COLUMNS}
-                                        data={gridData as unknown as Record<string, unknown>[]}
-                                        loading={isGridPending}
-                                        onCellDoubleClick={handleCellDoubleClick}
-                                        height="500px"
-                                    />
+                                    {/* 렌더링 단계 에러는 ErrorBoundary가 격리 — 차트/SearchPanel은 영향 없음 */}
+                                    <ErrorBoundary
+                                        fallback={
+                                            <div className="flex items-center justify-center h-[500px] text-sm text-text-muted border border-border rounded">
+                                                그리드를 렌더링하는 중 오류가 발생했습니다.
+                                            </div>
+                                        }
+                                    >
+                                        {gridState.error && (
+                                            <p className="mb-2 text-xs text-error">⚠️ {gridState.error}</p>
+                                        )}
+                                        <CompGrid
+                                            columns={COLUMNS}
+                                            data={gridState.data as unknown as Record<string, unknown>[]}
+                                            loading={isGridPending}
+                                            onCellDoubleClick={handleCellDoubleClick}
+                                            height="500px"
+                                        />
+                                    </ErrorBoundary>
                                     <p className="mt-2 text-xs text-text-muted">
                                         💡 셀을 더블클릭하면 해당 값 기반의 차트가 두번째 탭에 표시됩니다.
                                     </p>
                                 </TabSub>
                                 <TabSub label="차트 (Chart)">
-                                    <CompChart
-                                        data={chartData}
-                                        loading={isChartPending}
-                                        title="상태별 분포"
-                                        height="320px"
-                                    />
+                                    <ErrorBoundary
+                                        fallback={
+                                            <div className="flex items-center justify-center h-[320px] text-sm text-text-muted border border-border rounded">
+                                                차트를 렌더링하는 중 오류가 발생했습니다.
+                                            </div>
+                                        }
+                                    >
+                                        {chartState.error && (
+                                            <p className="mb-2 text-xs text-error">⚠️ {chartState.error}</p>
+                                        )}
+                                        <CompChart
+                                            data={chartState.data}
+                                            loading={isChartPending}
+                                            title="상태별 분포"
+                                            height="320px"
+                                        />
+                                    </ErrorBoundary>
                                 </TabSub>
                             </Tab>
                         </Panel>
