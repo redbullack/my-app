@@ -11,10 +11,11 @@
  */
 'use client'
 
-import { useRef } from 'react'
+import { useRef, type ReactNode, type ErrorInfo } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { cn } from '@/lib/utils'
 import type { GridColumn } from '@/types'
+import { ErrorBoundary } from '@/components/shared/ErrorBoundary'
 
 /* ── Skeleton 서브 컴포넌트 ── */
 
@@ -94,9 +95,26 @@ interface CompGridProps {
     row: Record<string, unknown>,
     rowIndex: number,
   ) => void
+  /** 렌더링 에러 발생 시 표시할 커스텀 fallback (옵션). 미지정 시 기본 fallback 사용. */
+  errorFallback?: ReactNode
+  /** 렌더링 에러 발생 시 호출되는 콜백 (옵션). 로깅/모니터링용. */
+  onError?: (error: Error, info: ErrorInfo) => void
 }
 
-function CompGrid({
+/* ── 기본 에러 fallback ── */
+function DefaultGridErrorFallback({ height = '600px' }: { height?: string }) {
+  return (
+    <div
+      className="flex flex-col items-center justify-center rounded-xl border border-error/40 bg-error/5 text-text-muted"
+      style={{ height }}
+    >
+      <p className="text-sm font-medium text-error">⚠️ 그리드를 렌더링하는 중 오류가 발생했습니다.</p>
+      <p className="mt-1 text-xs">데이터 형식을 확인하거나 페이지를 새로고침 해주세요.</p>
+    </div>
+  )
+}
+
+function CompGridInner({
   columns,
   data,
   loading = false,
@@ -107,6 +125,7 @@ function CompGrid({
   className,
   onCellDoubleClick,
 }: CompGridProps) {
+  // throw new Error('CLIENT: CompGridInner - 수동 랜더링 에러 입니다.')
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const rowVirtualizer = useVirtualizer({
@@ -221,6 +240,24 @@ function CompGrid({
         </div>
       </div>
     </div>
+  )
+}
+
+/* ── 에러 격리 래퍼 ──
+ * CompGrid를 사용하는 모든 화면이 자동으로 에러 격리 혜택을 받도록
+ * 외부 노출용 컴포넌트는 ErrorBoundary로 감싼 래퍼다. 사용처는
+ * <CompGrid ... /> 만 쓰면 되고, 렌더 에러가 나면 그리드 영역만
+ * fallback UI로 대체된다.
+ */
+function CompGrid(props: CompGridProps) {
+  const { errorFallback, onError, ...rest } = props
+  return (
+    <ErrorBoundary
+      fallback={errorFallback ?? <DefaultGridErrorFallback height={props.height} />}
+      onError={onError}
+    >
+      <CompGridInner {...rest} />
+    </ErrorBoundary>
   )
 }
 
