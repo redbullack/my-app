@@ -1,36 +1,39 @@
 /**
  * @module lib/db
  * @description
- * DB 클라이언트 팩토리.
- * DB_TYPE 환경변수(또는 인자)로 원하는 DB를 선택하면 해당 query 함수를 반환한다.
- * 현재는 'oracle'만 구현되어 있다.
+ * DB 레이어 public barrel.
+ *
+ * 신규 코드는 `getDb('NAME')` 사용 — `lib/db/config/databases.ts` 에 등록된 이름의 literal 만 허용.
+ * 기존 호출지(`getDbClient()`) 는 단계적 마이그레이션 동안만 호환 shim 으로 동작.
+ *
+ * 사용 예:
+ * ```ts
+ * import { getDb } from '@/lib/db'
+ * const db = getDb('MAIN')
+ * const rows = await db.query<Emp>('SELECT * FROM emp WHERE deptno = :d', { d: 10 })
+ * ```
  */
 
-import oracledb from 'oracledb'
-import { queryOracle } from './oracleClient'
+export { getDb } from './factory'
+export { DbError, SAFE_PUBLIC_MESSAGE, type DbErrorCategory } from './errors'
+export type { DbName } from './config/databases'
+export type {
+  IDbClient,
+  BindParams,
+  QueryOptions,
+  ExecuteResult,
+  PoolOptions,
+  ProviderName,
+} from './types'
 
-export type DbType = 'oracle'
-
-export interface DbClient {
-  query: <T = Record<string, unknown>>(
-    sql: string,
-    binds?: oracledb.BindParameters,
-  ) => Promise<T[]>
-}
+import { getDb } from './factory'
+import type { IDbClient } from './types'
 
 /**
- * DB 타입에 맞는 클라이언트를 반환하는 팩토리 함수.
- * @param type - 사용할 DB 종류 (기본값: 'oracle')
+ * @deprecated `getDb('MAIN')` 을 직접 사용하세요. 마이그레이션 완료 후 제거됩니다.
+ *
+ * 기존 9개 호출 지점이 무수정으로 동작하도록 유지하는 호환 shim.
  */
-export function getDbClient(type: DbType = 'oracle'): DbClient {
-  switch (type) {
-    case 'oracle':
-      return {
-        query: <T = Record<string, unknown>>(sql: string, binds: oracledb.BindParameters = []) =>
-          queryOracle<T>(sql, binds),
-      }
-    default:
-      throw new Error(`Unsupported DB type: ${type}`)
-  }
+export function getDbClient(): IDbClient {
+  return getDb('MAIN')
 }
-
