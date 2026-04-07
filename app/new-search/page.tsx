@@ -380,25 +380,32 @@ export default function NewSearchPage() {
                         <Panel variant="outlined">
                             <Tab activeIndex={activeTab} onChangeIndex={setActiveTab}>
                                 <TabSub label="검색 결과 (Grid)">
-                                    {/* 렌더링 단계 에러는 ErrorBoundary가 격리 — 차트/SearchPanel은 영향 없음 */}
-                                    <ErrorBoundary
-                                        fallback={
-                                            <div className="flex items-center justify-center h-[500px] text-sm text-text-muted border border-border rounded">
-                                                그리드를 렌더링하는 중 오류가 발생했습니다.
-                                            </div>
-                                        }
-                                    >
-                                        {gridState.error && (
-                                            <p className="mb-2 text-xs text-error">⚠️ {gridState.error}</p>
-                                        )}
-                                        <CompGrid
-                                            columns={COLUMNS}
-                                            data={gridState.data as unknown as Record<string, unknown>[]}
-                                            loading={isGridPending}
-                                            onCellDoubleClick={handleCellDoubleClick}
-                                            height="500px"
-                                        />
-                                    </ErrorBoundary>
+                                    {/*
+                                     * [변경] CompGrid 내부에 ErrorBoundary가 자동 래핑되어
+                                     * 더 이상 사용처에서 ErrorBoundary로 감쌀 필요가 없다.
+                                     * 렌더 에러가 발생하면 그리드 영역만 자동으로 fallback UI로 대체된다.
+                                     *
+                                     * --- 이전 구현 (참고용 보존) ---
+                                     * <ErrorBoundary
+                                     *     fallback={
+                                     *         <div className="flex items-center justify-center h-[500px] text-sm text-text-muted border border-border rounded">
+                                     *             그리드를 렌더링하는 중 오류가 발생했습니다.
+                                     *         </div>
+                                     *     }
+                                     * >
+                                     *     ...CompGrid...
+                                     * </ErrorBoundary>
+                                     */}
+                                    {gridState.error && (
+                                        <p className="mb-2 text-xs text-error">⚠️ {gridState.error}</p>
+                                    )}
+                                    <CompGrid
+                                        columns={COLUMNS}
+                                        data={gridState.data as unknown as Record<string, unknown>[]}
+                                        loading={isGridPending}
+                                        onCellDoubleClick={handleCellDoubleClick}
+                                        height="500px"
+                                    />
                                     <p className="mt-2 text-xs text-text-muted">
                                         💡 셀을 더블클릭하면 해당 값 기반의 차트가 두번째 탭에 표시됩니다.
                                     </p>
