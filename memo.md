@@ -1,3 +1,161 @@
+# Next.js 16
+	- React 17 (SPA)
+	- JS Bundle
+	- Full Stack
+
+
+# Client Boundary
+	- RSC / RCC
+	- 'use server' / 'use client'
+
+	
+# App Route
+	- layout.tsx
+	- template.tsx
+	- page.tsx
+	- loading.tsx
+	- error.tsx
+	- global-error.tsx
+	- not-found.tsx
+	- default.tsx
+	- route.ts
+	
+	- folder / 
+	- (folder) / 
+	- [folder] /
+	- [...folder] / 
+	- [[...folder]] / 
+	- @folder / 
+	- (.)folder
+	- _folder / 
+	
+	- params /asdf/
+	- searchParams /asdf?id=123
+
+	
+# API Route
+	- app/api/route.ts
+
+
+# Server Actions
+	- type key = SELECT COLUMN
+
+# Error / Loading
+	- page.tsx 랜더링 중 발생한 에러 --> error.tsx (React Error Boundary)
+	- 이벤트 핸들러 내부의 비동기 Promise rejection은 --> X error.tsx 이동하지 않음.
+	- useEffect의 비동기 콜백에서 던져진 에러 --> X error.tsx 이동하지 않음. (Error Boundary로 전파되지 않고 처리되지 않은 Promise rejection으로 콘솔에만 찍힌다.)
+	- 해결
+		- 상태로 저장했다가 랜더링 중 --> if (error) throw error
+		- useTransition() + startTransition() 사용
+		- useActionState() 사용
+		
+	- Suspense
+	- fallback
+	- layout -> Suspense (loading.tsx) -> page.tsx -> child component
+	- use()
+
+# tsconfig.json
+
+"compilerOptions": {
+  "baseUrl": ".",
+  "paths": {
+    "@/*": ["./src/*"],
+    "@components/*": ["./components/*"]
+  }
+}
+
+    "paths": {
+      "@/*": [
+        "./*"
+      ],
+      "@/app/*": [
+        "./app/*"
+      ],
+      "@/components/*": [
+        "./components/*"
+      ],
+      "@/lib/*": [
+        "./lib/*"
+      ],
+      "@/public/*": [
+        "./public/*"
+      ],
+      "@/styles/*": [
+        "./styles/*"
+      ]
+    }
+
+
+# proxy.ts
+	- Request --> proxy.ts --> Reponse 통과
+	
+	- 인증 및 인가 처리: 인증 토큰 확인 및 보호된 페이지 접근 제어.
+	- 라우팅 및 리다이렉트: 사용자 위치/조건에 따른 페이지 리다이렉트 (예: 국가별, 권한별).
+	- API 요청 통합 (BFF): 외부 API 요청을 프록시하여 보안 강화 및 CORS 문제 해결.
+	- 요청/응답 수정: 헤더 추가, 쿠키 설정(set) 및 조회(get).
+	- 캐싱 및 성능 최적화: 특정 경로에 대한 응답 캐싱 설정.
+	
+# cache
+
+async function getStockPrice() {
+  // 이 fetch는 결과를 캐싱하지 않고 매번 새롭게 서버에 요청합니다.
+  const res = await fetch('https://api.example.com/stock', { 
+    cache: 'no-store' 
+  });
+  return res.json();
+}
+
+
+// app/cart/page.tsx
+export const dynamic = 'force-dynamic'; // 이 페이지는 절대 캐싱하지 않음
+
+export default async function CartPage() {
+  // ...
+}
+
+
+async function getNewsHeadlines() {
+  // 이 데이터는 한 번 가져오면 60초 동안 캐싱됩니다.
+  // 60초가 지난 후 들어오는 첫 요청 시, 백그라운드에서 데이터를 새로 가져와 캐시를 교체합니다.
+  const res = await fetch('https://api.example.com/news', {
+    next: { revalidate: 60 } // 60초
+  });
+  return res.json();
+}
+
+
+// app/news/page.tsx
+export const revalidate = 3600; // 이 페이지는 1시간(3600초)마다 캐시 갱신
+
+export default async function NewsPage() {
+  // ...
+}
+
+
+const res = await fetch('https://api.example.com/posts', {
+  next: { tags: ['posts'] }
+});
+
+
+// app/actions.ts
+'use server'
+
+import { revalidateTag, revalidatePath } from 'next/cache';
+
+export async function createPost(formData: FormData) {
+  // 1. DB에 새 글 저장하는 로직
+  await db.post.create(formData);
+
+  // 2-A. 특정 태그가 붙은 캐시 날리기 (추천)
+  revalidateTag('posts'); 
+
+  // 2-B. 특정 경로(URL)의 캐시를 통째로 날리기
+  // revalidatePath('/board'); 
+}
+
+
+====================================================================================================
+
 - 클라이언트 경계(Client Boundary)
 
     1. Client Boundary란 무엇인가? (전체적인 개념)
