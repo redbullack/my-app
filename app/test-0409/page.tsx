@@ -24,6 +24,7 @@ import {
   type EmpRow,
   type EmpUpdateRow,
 } from './_actions/main'
+import { useErrorHandler } from '@/lib/hooks/useErrorHandler'
 
 /* ── EMP 테이블 컬럼만 추출 ── */
 
@@ -71,6 +72,7 @@ interface CondValues {
 }
 
 export default function Test0409Page() {
+  const { throwError } = useErrorHandler()
   const searchParams = useSearchParams()
   const router = useRouter()
   const tabIndex = Number(searchParams.get('tab') ?? '0')
@@ -119,6 +121,7 @@ export default function Test0409Page() {
   }, [])
 
   const handleSearchClick = useCallback(async () => {
+    // throwError(new Error('수동 에러 입니다 ~ ~~  ~ ~ !'))
     const cond: EmpSearchCond = { ...condValues }
     setGridDataSource(fetchEmpList(cond))
     setCheckedRows([])
