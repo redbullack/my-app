@@ -140,6 +140,14 @@ interface GridProps<T extends object = Row> {
   onCellDoubleClick?: (ev: { rowKey: number | string | null; columnName: string | null; value: unknown; rowData: Row }) => void
   onCheckChange?: (checkedRows: Row[]) => void
   onAfterChange?: (ev: { changes: Array<{ rowKey: number | string; columnName: string; value: unknown }> }) => void
+  /** editable 모드에서 변경된 행 목록을 자동 추적하여 콜백으로 전달 (before/after 포함) */
+  onModifiedRows?: (rows: ModifiedRow[]) => void
+}
+
+interface ModifiedRow {
+  rowKey: number | string
+  rowData: Row
+  changes: Record<string, { before: unknown; after: unknown }>
 }
 
 type GridContentProps = GridProps
@@ -161,6 +169,7 @@ function GridContent({
   onCellDoubleClick,
   onCheckChange,
   onAfterChange,
+  onModifiedRows,
 }: GridContentProps) {
   const resource = useMemo(() => {
     return typeof dataSource === 'function' ? dataSource() : dataSource
@@ -189,6 +198,10 @@ function GridContent({
   const sortingRef = useRef(false)
   const latestDataRef = useRef(data)
   latestDataRef.current = data
+
+  // onModifiedRows: 원본 스냅샷 & 변경맵 내부 관리
+  const snapshotRef = useRef<Row[]>([])
+  const changesMapRef = useRef<Record<string, Record<string, { before: unknown; after: unknown }>>>({})
 
   // TUI Grid 인스턴스 생성 (mount)
   useEffect(() => {
@@ -249,9 +262,35 @@ function GridContent({
           on('checkAll', emitCheckChange)
           on('uncheckAll', emitCheckChange)
         }
-        if (onAfterChange) {
+        if (onAfterChange || onModifiedRows) {
           on('afterChange', (ev) => {
-            onAfterChange({ changes: ev.changes ?? [] })
+            if (onAfterChange) onAfterChange({ changes: ev.changes ?? [] })
+            if (onModifiedRows) {
+              const changes = ev.changes ?? []
+              const map = changesMapRef.current
+              for (const ch of changes) {
+                const rk = String(ch.rowKey)
+                if (!map[rk]) map[rk] = {}
+                if (!map[rk][ch.columnName]) {
+                  const orig = snapshotRef.current[Number(ch.rowKey)]
+                  map[rk][ch.columnName] = { before: orig?.[ch.columnName] ?? null, after: ch.value }
+                } else {
+                  map[rk][ch.columnName].after = ch.value
+                }
+              }
+              // 실제 변경된 행만 필터링하여 콜백
+              const modified: ModifiedRow[] = []
+              for (const [rk, cols] of Object.entries(map)) {
+                const real: Record<string, { before: unknown; after: unknown }> = {}
+                for (const [col, c] of Object.entries(cols)) {
+                  if (String(c.before ?? '') !== String(c.after ?? '')) real[col] = c
+                }
+                if (Object.keys(real).length > 0) {
+                  modified.push({ rowKey: rk, rowData: instance.getRow(Number(rk)) ?? {}, changes: real })
+                }
+              }
+              onModifiedRows(modified)
+            }
           })
         }
 
@@ -305,6 +344,12 @@ function GridContent({
   useEffect(() => {
     if (!mountedRef.current || !instanceRef.current) return
     instanceRef.current.resetData(data as object[])
+    // onModifiedRows: 데이터 리셋 시 원본 스냅샷 갱신 & 변경맵 초기화
+    if (onModifiedRows) {
+      snapshotRef.current = data.map(r => ({ ...r }))
+      changesMapRef.current = {}
+      onModifiedRows([])
+    }
     requestAnimationFrame(() => {
       instanceRef.current?.refreshLayout()
     })
@@ -368,4 +413,4 @@ function Grid<T extends object = Row>(props: GridProps<T>) {
 Grid.Skeleton = GridSkeleton
 
 export default Grid
-export type { GridColumn, GridProps }
+export type { GridColumn, GridProps, ModifiedRow }

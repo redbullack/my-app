@@ -9,10 +9,10 @@
  */
 'use client'
 
-import { useCallback, useState, useRef } from 'react'
+import { useCallback, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { Input, SearchPanel, Grid, Panel, Button, Tab, TabSub, Modal } from '@/components/control'
-import type { GridColumn } from '@/components/control/Grid'
+import type { GridColumn, ModifiedRow } from '@/components/control/Grid'
 import RouteInfo from '@/components/shared/RouteInfo'
 import {
   fetchEmpList,
@@ -64,16 +64,6 @@ const detailGridColumns: GridColumn[] = [
   { name: 'DEPTNO', header: '부서번호', width: 80, align: 'center' },
 ]
 
-/* ── 변경 추적 타입 ── */
-
-interface CellChange {
-  before: unknown
-  after: unknown
-}
-
-// rowKey(EMPNO) → columnName → { before, after }
-type ChangesMap = Record<string, Record<string, CellChange>>
-
 interface CondValues {
   dname: string[]
   job: string[]
@@ -85,11 +75,14 @@ export default function Test0409Page() {
   const router = useRouter()
   const tabIndex = Number(searchParams.get('tab') ?? '0')
 
-  const setTab = useCallback((idx: number) => {
-    const params = new URLSearchParams(searchParams.toString())
-    params.set('tab', String(idx))
-    router.replace(`?${params.toString()}`, { scroll: false })
-  }, [searchParams, router])
+  // const setTab = useCallback((idx: number) => {
+  //   const params = new URLSearchParams(searchParams.toString())
+  //   params.set('tab', String(idx))
+  //   router.replace(`?${params.toString()}`, { scroll: false })
+  // }, [searchParams, router])
+  const handleChangeIndex = (index: number) => {
+    router.push(`?tab=${index}`, { scroll: false })
+  }
 
   /* ── 검색 조건 상태 ── */
   const [condValues, setCondValues] = useState<CondValues>({ dname: [], job: [], ename: [] })
@@ -100,8 +93,7 @@ export default function Test0409Page() {
 
   /* ── Tab 2: Detail Grid 데이터 ── */
   const [detailRows, setDetailRows] = useState<EmpOnly[]>([])
-  const originalRowsRef = useRef<EmpOnly[]>([])
-  const [changesMap, setChangesMap] = useState<ChangesMap>({})
+  const [modifiedRows, setModifiedRows] = useState<ModifiedRow[]>([])
 
   /* ── 모달 상태 ── */
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -131,9 +123,9 @@ export default function Test0409Page() {
     setGridDataSource(fetchEmpList(cond))
     setCheckedRows([])
     setDetailRows([])
-    setChangesMap({})
-    originalRowsRef.current = []
-    setTab(0)
+    setModifiedRows([])
+    // setTab(0)
+    handleChangeIndex(0)
   }, [condValues])
 
   /* ── Tab 2로 행 추가 (중복 EMPNO 제거) ── */
@@ -141,13 +133,12 @@ export default function Test0409Page() {
     setDetailRows(prev => {
       const existingKeys = new Set(prev.map(r => r.EMPNO))
       const newRows = rows.filter(r => !existingKeys.has(r.EMPNO))
-      const merged = [...prev, ...newRows]
-      originalRowsRef.current = merged.map(r => ({ ...r }))
-      return merged
+      return [...prev, ...newRows]
     })
-    setChangesMap({})
-    setTab(1)
-  }, [setTab])
+    // setTab(1)
+    handleChangeIndex(1)
+    // }, [setTab])
+  }, [])
 
   /* ── Tab 1 이벤트 ── */
 
@@ -170,92 +161,37 @@ export default function Test0409Page() {
 
   /* ── Tab 2 이벤트 ── */
 
-  const handleDetailAfterChange = useCallback((ev: { changes: Array<{ rowKey: number | string; columnName: string; value: unknown }> }) => {
-    setChangesMap(prev => {
-      const next = { ...prev }
-      for (const ch of ev.changes) {
-        const rk = String(ch.rowKey)
-        if (!next[rk]) next[rk] = {}
-        // before 값은 최초 변경 시에만 기록
-        if (!next[rk][ch.columnName]) {
-          const orig = originalRowsRef.current[Number(rk)]
-          next[rk][ch.columnName] = {
-            before: orig ? (orig as Record<string, unknown>)[ch.columnName] : null,
-            after: ch.value,
-          }
-        } else {
-          next[rk][ch.columnName] = { ...next[rk][ch.columnName], after: ch.value }
-        }
-      }
-      return next
-    })
-    // detailRows도 동기화
-    setDetailRows(prev => {
-      const updated = [...prev]
-      for (const ch of ev.changes) {
-        const idx = Number(ch.rowKey)
-        if (updated[idx]) {
-          updated[idx] = { ...updated[idx], [ch.columnName]: ch.value }
-        }
-      }
-      return updated
-    })
-  }, [])
-
-  /* ── 변경된 행 계산 ── */
-  const getChangedRows = useCallback(() => {
-    const result: { empno: string; changes: Record<string, CellChange> }[] = []
-    for (const [rk, cols] of Object.entries(changesMap)) {
-      const realChanges: Record<string, CellChange> = {}
-      for (const [col, change] of Object.entries(cols)) {
-        if (String(change.before ?? '') !== String(change.after ?? '')) {
-          realChanges[col] = change
-        }
-      }
-      if (Object.keys(realChanges).length > 0) {
-        const row = detailRows[Number(rk)]
-        result.push({ empno: row?.EMPNO ?? rk, changes: realChanges })
-      }
-    }
-    return result
-  }, [changesMap, detailRows])
-
   const handleSaveClick = useCallback(() => {
-    const changed = getChangedRows()
-    if (changed.length === 0) {
+    if (modifiedRows.length === 0) {
       alert('변경된 내용이 없습니다.')
       return
     }
     setIsModalOpen(true)
-  }, [getChangedRows])
+  }, [modifiedRows])
 
   const handleConfirmSave = useCallback(async () => {
     setIsSaving(true)
     try {
-      const changed = getChangedRows()
-      const updateRows: EmpUpdateRow[] = changed.map(c => {
-        const row = detailRows.find(r => r.EMPNO === c.empno)!
+      const updateRows: EmpUpdateRow[] = modifiedRows.map(m => {
+        const rd = m.rowData as Record<string, unknown>
         return {
-          EMPNO: c.empno,
-          ENAME: row.ENAME ?? null,
-          SAL: row.SAL != null ? String(row.SAL) : null,
-          COMM: row.COMM != null ? String(row.COMM) : null,
+          EMPNO: String(rd.EMPNO ?? m.rowKey),
+          ENAME: rd.ENAME != null ? String(rd.ENAME) : null,
+          SAL: rd.SAL != null ? String(rd.SAL) : null,
+          COMM: rd.COMM != null ? String(rd.COMM) : null,
         }
       })
       const result = await updateEmpRows(updateRows)
       alert(`${result.updated}건 수정 완료`)
-      // 원본 갱신 & 변경맵 초기화
-      originalRowsRef.current = detailRows.map(r => ({ ...r }))
-      setChangesMap({})
+      // Grid가 resetData 시 자동으로 스냅샷 갱신하므로 detailRows를 다시 set
+      setDetailRows(prev => [...prev])
       setIsModalOpen(false)
     } catch (err) {
       alert('수정 실패: ' + (err instanceof Error ? err.message : String(err)))
     } finally {
       setIsSaving(false)
     }
-  }, [getChangedRows, detailRows])
-
-  const changedRows = isModalOpen ? getChangedRows() : []
+  }, [modifiedRows])
 
   const COLUMN_LABELS: Record<string, string> = { ENAME: '이름', SAL: '급여', COMM: '커미션' }
 
@@ -286,7 +222,7 @@ export default function Test0409Page() {
           </SearchPanel>
 
           <div className="flex-1 min-w-0">
-            <Tab activeIndex={tabIndex} onChangeIndex={setTab}>
+            <Tab activeIndex={tabIndex} onChangeIndex={handleChangeIndex}>
               {/* ── Tab 1: 조회 ── */}
               <TabSub label="조회">
                 <Panel variant="outlined">
@@ -336,7 +272,7 @@ export default function Test0409Page() {
                     rowHeaders={['rowNum']}
                     columnResizable
                     editable
-                    onAfterChange={handleDetailAfterChange}
+                    onModifiedRows={setModifiedRows}
                   />
                 </Panel>
               </TabSub>
@@ -359,29 +295,32 @@ export default function Test0409Page() {
         <div className="space-y-4">
           <p className="text-sm text-text-secondary">아래 내용을 수정하시겠습니까?</p>
           <div className="max-h-80 overflow-y-auto space-y-3">
-            {changedRows.map(({ empno, changes }) => (
-              <div key={empno} className="rounded border border-border p-3">
-                <p className="text-sm font-semibold text-text-primary mb-2">사번: {empno}</p>
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-text-muted">
-                      <th className="text-left py-1">컬럼</th>
-                      <th className="text-left py-1">이전</th>
-                      <th className="text-left py-1">이후</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.entries(changes).map(([col, { before, after }]) => (
-                      <tr key={col}>
-                        <td className="py-1 text-text-primary">{COLUMN_LABELS[col] ?? col}</td>
-                        <td className="py-1 text-text-muted line-through">{String(before ?? '(없음)')}</td>
-                        <td className="py-1 text-accent font-medium">{String(after ?? '(없음)')}</td>
+            {modifiedRows.map(m => {
+              const empno = String((m.rowData as Record<string, unknown>).EMPNO ?? m.rowKey)
+              return (
+                <div key={empno} className="rounded border border-border p-3">
+                  <p className="text-sm font-semibold text-text-primary mb-2">사번: {empno}</p>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-text-muted">
+                        <th className="text-left py-1">컬럼</th>
+                        <th className="text-left py-1">이전</th>
+                        <th className="text-left py-1">이후</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ))}
+                    </thead>
+                    <tbody>
+                      {Object.entries(m.changes).map(([col, { before, after }]) => (
+                        <tr key={col}>
+                          <td className="py-1 text-text-primary">{COLUMN_LABELS[col] ?? col}</td>
+                          <td className="py-1 text-text-muted line-through">{String(before ?? '(없음)')}</td>
+                          <td className="py-1 text-accent font-medium">{String(after ?? '(없음)')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            })}
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="secondary" size="sm" onClick={() => setIsModalOpen(false)}>
