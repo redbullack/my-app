@@ -15,6 +15,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 import ThemeProvider from '@/components/layout/ThemeProvider'
 import AuthSessionProvider from '@/components/auth/SessionProvider'
+import GlobalErrorCatcher from '@/components/providers/GlobalErrorCatcher'
 import Header from '@/components/layout/Header'
 import Footer from '@/components/layout/Footer'
 
@@ -48,12 +49,14 @@ export default function RootLayout({
       </head>
       <body className="min-h-screen flex flex-col bg-bg-primary text-text-primary">
         <AuthSessionProvider>
-          <ThemeProvider>
-            <Header />
-            <main className="flex-1">{children}</main>
-            {modal}
-            <Footer />
-          </ThemeProvider>
+          <GlobalErrorCatcher>
+            <ThemeProvider>
+              <Header />
+              <main className="flex-1">{children}</main>
+              {modal}
+              <Footer />
+            </ThemeProvider>
+          </GlobalErrorCatcher>
         </AuthSessionProvider>
       </body>
     </html>
