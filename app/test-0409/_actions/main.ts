@@ -189,3 +189,39 @@ export async function fetchEnameOptions(
   )
   return rows.map(r => r.VALUE)
 }
+
+/* ────────────────────────────────────────────────
+ * EMP 수정 (UPDATE)
+ * ────────────────────────────────────────────────*/
+
+export interface EmpUpdateRow {
+  EMPNO: string
+  ENAME: string | null
+  SAL: string | null
+  COMM: string | null
+}
+
+export async function updateEmpRows(
+  rows: EmpUpdateRow[],
+): Promise<{ success: boolean; updated: number }> {
+  let updated = 0
+  for (const row of rows) {
+    await db.execute(
+      `
+      UPDATE SCOTT.EMP
+         SET ENAME = :ename
+           , SAL   = :sal
+           , COMM  = :comm
+       WHERE EMPNO = :empno
+      `,
+      {
+        ename: row.ENAME,
+        sal: row.SAL ? Number(row.SAL) : null,
+        comm: row.COMM ? Number(row.COMM) : null,
+        empno: Number(row.EMPNO),
+      },
+    )
+    updated++
+  }
+  return { success: true, updated }
+}

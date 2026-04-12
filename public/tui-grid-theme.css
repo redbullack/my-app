@@ -1,0 +1,204 @@
+/**
+ * tui-grid-theme.css
+ * tui-grid.css의 하드코딩된 색상(#fff, #f4f4f4 등)을
+ * 프로젝트 CSS 변수(--color-*)로 덮어쓰는 테마 오버라이드.
+ *
+ * CSS 변수는 :root / .dark에서 자동 전환되므로
+ * JS 개입 없이 라이트/다크 테마가 즉시 반영된다.
+ *
+ * 이 파일은 반드시 tui-grid.css 뒤에 로드되어야 한다.
+ */
+
+/* ── 컨테이너 / 영역 ── */
+.tui-grid-container {
+  color: var(--color-text-primary) !important;
+  background-color: var(--color-bg-primary) !important;
+}
+.tui-grid-body-area {
+  background-color: var(--color-bg-primary) !important;
+}
+.tui-grid-header-area {
+  background-color: var(--color-bg-tertiary) !important;
+}
+.tui-grid-content-area {
+  background-color: var(--color-bg-primary) !important;
+}
+.tui-grid-rside-area,
+.tui-grid-lside-area {
+  background-color: var(--color-bg-primary) !important;
+}
+
+/* ── 셀 ── */
+.tui-grid-cell {
+  background-color: var(--color-bg-primary) !important;
+  color: var(--color-text-primary) !important;
+  border-color: var(--color-border) !important;
+}
+.tui-grid-cell .tui-grid-cell-content {
+  color: var(--color-text-primary) !important;
+}
+.tui-grid-cell-header {
+  background-color: var(--color-bg-tertiary) !important;
+  color: var(--color-text-secondary) !important;
+  border-color: var(--color-border) !important;
+}
+.tui-grid-cell-row-header {
+  background-color: var(--color-bg-tertiary) !important;
+  color: var(--color-text-secondary) !important;
+  border-color: var(--color-border) !important;
+}
+.tui-grid-row-even .tui-grid-cell {
+  background-color: var(--color-bg-secondary) !important;
+}
+.tui-grid-cell-editable {
+  background-color: var(--color-bg-primary) !important;
+  color: var(--color-text-primary) !important;
+}
+.tui-grid-cell-focused {
+  outline-color: var(--color-accent) !important;
+}
+.tui-grid-cell-selected {
+  background-color: var(--color-bg-tertiary) !important;
+}
+.tui-grid-cell-summary {
+  background-color: var(--color-bg-tertiary) !important;
+  color: var(--color-text-primary) !important;
+}
+
+/* ── 레이어 (편집 / 상태 / 포커스 / 선택) ── */
+.tui-grid-layer-state {
+  background: var(--color-bg-primary) !important;
+  color: var(--color-text-primary) !important;
+}
+.tui-grid-layer-state-content {
+  background: var(--color-bg-primary) !important;
+}
+.tui-grid-layer-editing {
+  background: var(--color-bg-primary) !important;
+}
+.tui-grid-layer-editing input,
+.tui-grid-layer-editing select,
+.tui-grid-layer-editing textarea {
+  background-color: var(--color-bg-primary) !important;
+  color: var(--color-text-primary) !important;
+  border-color: var(--color-border) !important;
+}
+.tui-grid-layer-focus {
+  border-color: var(--color-accent) !important;
+}
+.tui-grid-layer-selection {
+  background-color: var(--color-accent) !important;
+  opacity: 0.15 !important;
+}
+.tui-grid-clipboard {
+  background-color: var(--color-bg-primary) !important;
+  color: var(--color-text-primary) !important;
+}
+
+/* ── 스크롤바 코너 / 리사이즈 ── */
+.tui-grid-scrollbar-y-inner-border,
+.tui-grid-scrollbar-x-inner-border,
+.tui-grid-scrollbar-right-top,
+.tui-grid-scrollbar-left-bottom,
+.tui-grid-scrollbar-right-bottom {
+  background-color: var(--color-bg-primary) !important;
+  border-color: var(--color-border) !important;
+}
+.tui-grid-height-resize-handle {
+  background-color: var(--color-bg-tertiary) !important;
+  border-color: var(--color-border) !important;
+}
+
+/* ── 필터 ── */
+.tui-grid-filter-container {
+  background-color: var(--color-bg-secondary) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-text-primary) !important;
+}
+.tui-grid-filter-container input {
+  background-color: var(--color-bg-primary) !important;
+  color: var(--color-text-primary) !important;
+  border-color: var(--color-border) !important;
+}
+.tui-grid-filter-container select,
+.tui-grid-filter-dropdown select {
+  background-color: var(--color-bg-primary) !important;
+  color: var(--color-text-primary) !important;
+  border-color: var(--color-border) !important;
+}
+.tui-grid-filter-list .tui-grid-filter-list-item-checked {
+  background-color: var(--color-bg-tertiary) !important;
+}
+
+/* ── 에디터 체크박스 ── */
+.tui-grid-editor-checkbox-list-layer {
+  background-color: var(--color-bg-secondary) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-text-primary) !important;
+}
+.tui-grid-editor-checkbox-hovered {
+  background-color: var(--color-bg-tertiary) !important;
+}
+
+/* ── 플로팅 (드래그) ── */
+.tui-grid-floating-row {
+  background: var(--color-bg-secondary) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-text-primary) !important;
+}
+.tui-grid-floating-column {
+  background: var(--color-bg-secondary) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-text-primary) !important;
+}
+
+/* ── 컨텍스트 메뉴 ── */
+.tui-grid-context-menu {
+  background-color: var(--color-bg-secondary) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-text-primary) !important;
+}
+.tui-grid-context-menu .menu-item:hover {
+  background-color: var(--color-bg-tertiary) !important;
+}
+
+/* ── tui-select-box ── */
+.tui-select-box-input,
+.tui-select-box-dropdown {
+  background: var(--color-bg-secondary) !important;
+  color: var(--color-text-primary) !important;
+  border-color: var(--color-border) !important;
+}
+.tui-select-box-item {
+  color: var(--color-text-primary) !important;
+}
+.tui-select-box-selected {
+  background: var(--color-bg-tertiary) !important;
+}
+.tui-select-box-highlight {
+  background: var(--color-bg-tertiary) !important;
+}
+.tui-select-box-disabled {
+  background: var(--color-bg-tertiary) !important;
+  color: var(--color-text-muted) !important;
+}
+
+/* ── 스크롤바 (webkit) ── */
+.tui-grid-container ::-webkit-scrollbar-track {
+  background: var(--color-bg-secondary);
+}
+.tui-grid-container ::-webkit-scrollbar-thumb {
+  background-color: var(--color-bg-tertiary);
+}
+
+/* ── 기타 ── */
+.tui-grid-border-line {
+  background-color: var(--color-border) !important;
+}
+.tui-grid-pagination-container {
+  background-color: var(--color-bg-primary) !important;
+}
+.tui-grid-no-data {
+  color: var(--color-text-muted) !important;
+  background-color: var(--color-bg-primary) !important;
+}
