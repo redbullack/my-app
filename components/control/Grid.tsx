@@ -85,7 +85,7 @@ function GridSkeleton({
               <div key={col.key} className="px-3 shrink-0 flex-1">
                 <div
                   className="h-2.5 rounded bg-bg-tertiary animate-pulse"
-                  style={{ width: `${50 + Math.random() * 40}%` }}
+                  style={{ width: `${50 + ((i * 7 + cols.indexOf(col) * 13) % 40)}%` }}
                 />
               </div>
             ))}
@@ -108,38 +108,16 @@ function deriveColumns(rows: Row[]): GridColumn[] {
   }))
 }
 
-/* ── 테마 적용 ── */
+/* ── 테마 CSS 로드 ── */
 
-function applyGridTheme(TuiGrid: typeof import('tui-grid').default) {
-  const styles = getComputedStyle(document.documentElement)
-  const get = (v: string) => styles.getPropertyValue(v).trim()
-
-  TuiGrid.applyTheme('default', {
-    cell: {
-      normal: {
-        background: get('--color-bg-primary'),
-        text: get('--color-text-primary'),
-        border: get('--color-border'),
-      },
-      header: {
-        background: get('--color-bg-tertiary'),
-        text: get('--color-text-secondary'),
-        border: get('--color-border'),
-      },
-      evenRow: {
-        background: get('--color-bg-secondary'),
-      },
-      selectedHeader: {
-        background: get('--color-accent'),
-      },
-    },
-    outline: {
-      border: get('--color-border'),
-    },
-    frozenBorder: {
-      border: get('--color-border'),
-    },
-  })
+/** tui-grid.css 뒤에 테마 오버라이드 CSS를 <link>로 한 번만 삽입 */
+function loadThemeCss() {
+  if (document.querySelector('link[data-tui-grid-theme-css]')) return
+  const link = document.createElement('link')
+  link.rel = 'stylesheet'
+  link.setAttribute('data-tui-grid-theme-css', '')
+  link.href = '/tui-grid-theme.css'
+  document.head.appendChild(link)
 }
 
 /* ── 메인 Props ── */
@@ -159,21 +137,17 @@ interface GridProps<T extends object = Row> {
   columnResizable?: boolean
   frozenColumnCount?: number
   editable?: boolean
-  gridRef?: React.RefObject<TuiGridInstance | null>
-  onCellDoubleClick?: (ev: { rowKey: number | string | null; columnName: string | null; value: unknown }) => void
-  onCheck?: (ev: { rowKey: number | string | null }) => void
-  onUncheck?: (ev: { rowKey: number | string | null }) => void
+  onCellDoubleClick?: (ev: { rowKey: number | string | null; columnName: string | null; value: unknown; rowData: Row }) => void
+  onCheckChange?: (checkedRows: Row[]) => void
   onAfterChange?: (ev: { changes: Array<{ rowKey: number | string; columnName: string; value: unknown }> }) => void
 }
 
-interface GridContentProps extends Omit<GridProps, 'dataSource'> {
-  resource: Row[] | Promise<Row[]>
-}
+type GridContentProps = GridProps
 
 /* ── GridContent: TUI Grid 인스턴스 관리 ── */
 
 function GridContent({
-  resource,
+  dataSource,
   columns: columnsProp,
   height = '600px',
   rowHeight = 40,
@@ -184,12 +158,14 @@ function GridContent({
   columnResizable = true,
   frozenColumnCount,
   editable = false,
-  gridRef,
   onCellDoubleClick,
-  onCheck,
-  onUncheck,
+  onCheckChange,
   onAfterChange,
 }: GridContentProps) {
+  const resource = useMemo(() => {
+    return typeof dataSource === 'function' ? dataSource() : dataSource
+  }, [dataSource]) as Row[] | Promise<Row[]>
+
   const data: Row[] = resource instanceof Promise ? use(resource) : resource
 
   const resolvedColumns = useMemo(
@@ -207,83 +183,117 @@ function GridContent({
   }, [resolvedColumns, sortable])
 
   const containerRef = useRef<HTMLDivElement>(null)
+  const overlayRef = useRef<HTMLDivElement>(null)
   const instanceRef = useRef<TuiGridInstance>(null)
   const mountedRef = useRef(false)
+  const sortingRef = useRef(false)
+  const latestDataRef = useRef(data)
+  latestDataRef.current = data
 
   // TUI Grid 인스턴스 생성 (mount)
   useEffect(() => {
     let destroyed = false
 
-    ;(async () => {
-      const TuiGrid = (await import('tui-grid')).default
-      // tui-grid CSS는 IE 핵(*property) 때문에 Turbopack 파서 에러 발생
-      // 번들러 대신 public/tui-grid.css를 <link> 태그로 런타임 로드
-      if (!document.querySelector('link[data-tui-grid-css]')) {
-        const link = document.createElement('link')
-        link.rel = 'stylesheet'
-        link.setAttribute('data-tui-grid-css', '')
-        link.href = '/tui-grid.css'
-        document.head.appendChild(link)
-      }
+      ; (async () => {
+        const TuiGrid = (await import('tui-grid')).default
+        // tui-grid CSS는 IE 핵(*property) 때문에 Turbopack 파서 에러 발생
+        // 번들러 대신 public/tui-grid.css를 <link> 태그로 런타임 로드
+        if (!document.querySelector('link[data-tui-grid-css]')) {
+          const link = document.createElement('link')
+          link.rel = 'stylesheet'
+          link.setAttribute('data-tui-grid-css', '')
+          link.href = '/tui-grid.css'
+          document.head.appendChild(link)
+        }
+        // 테마 오버라이드 CSS 로드 (CSS 변수 기반이므로 다크/라이트 자동 전환)
+        loadThemeCss()
 
-      if (destroyed || !containerRef.current) return
+        if (destroyed || !containerRef.current) return
 
-      applyGridTheme(TuiGrid)
-
-      const instance = new TuiGrid({
-        el: containerRef.current,
-        data: data as unknown as OptRow[],
-        columns: finalColumns as unknown as OptColumn[],
-        rowHeight,
-        bodyHeight: parseInt(height) || 600,
-        rowHeaders,
-        columnOptions: {
-          resizable: columnResizable,
-          frozenCount: frozenColumnCount,
-        },
-      })
-
-      // 빈 데이터 메시지 설정
-      if (data.length === 0) {
-        // TUI Grid는 빈 상태일 때 자체적으로 "No data." 를 보여줌
-        // 커스텀 메시지는 별도 오버레이로 처리 가능하지만, 기본 동작 사용
-      }
-
-      // 이벤트 바인딩 — TuiGridEvent 타입이 런타임 필드를 노출하지 않으므로 any 캐스팅
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const on = (name: GridEventName, fn: (ev: any) => void) => instance.on(name, fn as never)
-
-      if (onCellDoubleClick) {
-        on('dblclick', (ev) => {
-          const { rowKey, columnName } = ev
-          if (rowKey == null || !columnName) return
-          const value = instance.getValue(rowKey, columnName)
-          onCellDoubleClick({ rowKey, columnName, value })
+        const instance = new TuiGrid({
+          el: containerRef.current,
+          data: data as unknown as OptRow[],
+          columns: finalColumns as unknown as OptColumn[],
+          rowHeight,
+          bodyHeight: parseInt(height) || 600,
+          rowHeaders,
+          columnOptions: {
+            resizable: columnResizable,
+            frozenCount: frozenColumnCount,
+          },
         })
-      }
-      if (onCheck) {
-        on('check', (ev) => onCheck({ rowKey: ev.rowKey ?? null }))
-      }
-      if (onUncheck) {
-        on('uncheck', (ev) => onUncheck({ rowKey: ev.rowKey ?? null }))
-      }
-      if (onAfterChange) {
-        on('afterChange', (ev) => {
-          onAfterChange({ changes: ev.changes ?? [] })
-        })
-      }
 
-      instanceRef.current = instance
-      if (gridRef) gridRef.current = instance
-      mountedRef.current = true
-    })()
+        // 빈 데이터 메시지 설정
+        if (data.length === 0) {
+          // TUI Grid는 빈 상태일 때 자체적으로 "No data." 를 보여줌
+          // 커스텀 메시지는 별도 오버레이로 처리 가능하지만, 기본 동작 사용
+        }
+
+        // 이벤트 바인딩 — TuiGridEvent 타입이 런타임 필드를 노출하지 않으므로 any 캐스팅
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const on = (name: GridEventName, fn: (ev: any) => void) => instance.on(name, fn as never)
+
+        if (onCellDoubleClick) {
+          on('dblclick', (ev) => {
+            const { rowKey, columnName } = ev
+            if (rowKey == null || !columnName) return
+            const value = instance.getValue(rowKey, columnName)
+            const rowData = instance.getRow(rowKey) ?? {}
+            onCellDoubleClick({ rowKey, columnName, value, rowData })
+          })
+        }
+        if (onCheckChange) {
+          const emitCheckChange = () => onCheckChange(instance.getCheckedRows())
+          on('check', emitCheckChange)
+          on('uncheck', emitCheckChange)
+          on('checkAll', emitCheckChange)
+          on('uncheckAll', emitCheckChange)
+        }
+        if (onAfterChange) {
+          on('afterChange', (ev) => {
+            onAfterChange({ changes: ev.changes ?? [] })
+          })
+        }
+
+        // 정렬 시 스켈레톤 오버레이: 동기 정렬이 메인 스레드를 블로킹하므로
+        // beforeSort에서 기본 동작을 막고, overlay를 paint한 뒤 수동 정렬
+        if (sortable) {
+          on('beforeSort', (ev) => {
+            if (sortingRef.current) return
+            ev.stop()
+            const { columnName, ascending } = ev
+            if (overlayRef.current) overlayRef.current.classList.remove('hidden')
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                sortingRef.current = true
+                instance.sort(columnName, ascending)
+                sortingRef.current = false
+              })
+            })
+          })
+          on('afterSort', () => {
+            if (overlayRef.current) overlayRef.current.classList.add('hidden')
+          })
+        }
+
+        instanceRef.current = instance
+        mountedRef.current = true
+
+        // 비동기 인스턴스 생성 중 data가 변경되었을 수 있으므로 최신 data로 갱신
+        if (latestDataRef.current !== data) {
+          instance.resetData(latestDataRef.current as unknown as OptRow[])
+        }
+        requestAnimationFrame(() => {
+          instance.refreshLayout()
+        })
+      })()
 
     return () => {
       destroyed = true
+      sortingRef.current = false
       if (instanceRef.current) {
         instanceRef.current.destroy()
         instanceRef.current = null
-        if (gridRef) gridRef.current = null
         mountedRef.current = false
       }
     }
@@ -291,10 +301,13 @@ function GridContent({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 데이터 변경 시 resetData
+  // 데이터 변경 시 resetData + refreshLayout (frozen/non-frozen 영역 동기화)
   useEffect(() => {
     if (!mountedRef.current || !instanceRef.current) return
     instanceRef.current.resetData(data as object[])
+    requestAnimationFrame(() => {
+      instanceRef.current?.refreshLayout()
+    })
   }, [data])
 
   // 컬럼 변경 시 setColumns
@@ -303,14 +316,39 @@ function GridContent({
     instanceRef.current.setColumns(finalColumns as object[])
   }, [finalColumns])
 
+  // hidden → visible 전환 시 refreshLayout (탭 등에서 display:none 상태로 마운트된 경우 대응)
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && instanceRef.current) {
+          instanceRef.current.refreshLayout()
+        }
+      },
+      { threshold: 0.01 },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
   return (
-    <div className={cn('rounded-xl border border-border overflow-hidden', className)}>
+    <div className={cn('relative rounded-xl border border-border overflow-hidden', className)}>
       {/* 건수 표시 */}
       <div className="px-3 py-1.5 text-xs text-text-secondary border-b border-border bg-bg-primary">
         총 <strong className="text-text-primary">{data.length.toLocaleString()}</strong>건
       </div>
       {/* TUI Grid 마운트 포인트 */}
       <div ref={containerRef} />
+      {/* 정렬 시 스켈레톤 오버레이 */}
+      {sortable && (
+        <div
+          ref={overlayRef}
+          className="absolute inset-0 z-50 hidden bg-bg-primary/80 backdrop-blur-sm"
+        >
+          <GridSkeleton height={height} className="border-0 rounded-none" />
+        </div>
+      )}
     </div>
   )
 }
@@ -318,18 +356,11 @@ function GridContent({
 /* ── Grid: Suspense 래퍼 ── */
 
 function Grid<T extends object = Row>(props: GridProps<T>) {
-  const { dataSource, height, className } = props
-
-  const resource = useMemo(() => {
-    const raw = typeof dataSource === 'function' ? dataSource() : dataSource
-    return raw as Row[] | Promise<Row[]>
-  }, [dataSource])
-
-  const fallback: ReactNode = <GridSkeleton height={height} className={className} />
+  const { height, className } = props
 
   return (
-    <Suspense fallback={fallback}>
-      <GridContent {...props} resource={resource} />
+    <Suspense fallback={<GridSkeleton height={height} className={className} />}>
+      <GridContent {...(props as GridContentProps)} />
     </Suspense>
   )
 }
