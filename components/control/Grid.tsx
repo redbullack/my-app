@@ -171,10 +171,24 @@ function GridContent({
   onAfterChange,
   onModifiedRows,
 }: GridContentProps) {
-  const resource = useMemo(() => {
-    return typeof dataSource === 'function' ? dataSource() : dataSource
-  }, [dataSource]) as Row[] | Promise<Row[]>
+  // [기존] useMemo는 Suspense suspend 시 캐시가 폐기되어 function dataSource에서 무한 루프 발생
+  // const resource = useMemo(() => {
+  //   return typeof dataSource === 'function' ? dataSource() : dataSource
+  // }, [dataSource]) as Row[] | Promise<Row[]>
 
+  // [수정] useRef는 suspend 재시도에서도 유지되므로 동일 Promise 참조를 보장
+  const resourceRef = useRef<{ key: unknown; value: Row[] | Promise<Row[]> }>({ key: undefined, value: [] })
+  if (resourceRef.current.key !== dataSource) {
+    resourceRef.current = {
+      key: dataSource,
+      // Server Action은 렌더 중 호출 시 Router setState 경고 발생 → microtask로 지연
+      value: typeof dataSource === 'function'
+        ? Promise.resolve().then(() => dataSource() as Row[] | Promise<Row[]>)
+        : dataSource,
+    }
+  }
+  const resource = resourceRef.current.value
+  console.log(`CLIENT: Grid.tsx - resourceRef.current.key: ${resourceRef.current.key}, resourceRef.current.value: ${resourceRef.current.value}`)
   const data: Row[] = resource instanceof Promise ? use(resource) : resource
 
   const resolvedColumns = useMemo(
