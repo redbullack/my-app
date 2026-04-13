@@ -90,7 +90,7 @@ export default function Test0409Page() {
   const [condValues, setCondValues] = useState<CondValues>({ dname: [], job: [], ename: [] })
 
   /* ── Tab 1: Grid 데이터 ── */
-  const [gridDataSource, setGridDataSource] = useState<EmpRow[] | Promise<EmpRow[]>>([])
+  const [gridDataSource, setGridDataSource] = useState<EmpRow[] | Promise<EmpRow[]> | (() => Promise<EmpRow[]>)>([])
   const [checkedRows, setCheckedRows] = useState<EmpRow[]>([])
 
   /* ── Tab 2: Detail Grid 데이터 ── */
@@ -122,26 +122,23 @@ export default function Test0409Page() {
 
   const handleSearchClick = useCallback(async () => {
     // throwError(new Error('수동 에러 입니다 ~ ~~  ~ ~ !'))
+    // throw Error('수동 에러 입니다 ~ ~~  ~ ~ !')
+
     const cond: EmpSearchCond = { ...condValues }
-    setGridDataSource(fetchEmpList(cond))
+
+    // setGridDataSource(fetchEmpList(cond))
+
+    setGridDataSource(() => fetchEmpList.bind(null, cond))
+
+    // const rst = await fetchEmpList(cond);
+    // setGridDataSource(rst)
+
     setCheckedRows([])
     setDetailRows([])
     setModifiedRows([])
     // setTab(0)
     handleChangeIndex(0)
   }, [condValues])
-
-  /* ── Tab 2로 행 추가 (중복 EMPNO 제거) ── */
-  const addToDetail = useCallback((rows: EmpOnly[]) => {
-    setDetailRows(prev => {
-      const existingKeys = new Set(prev.map(r => r.EMPNO))
-      const newRows = rows.filter(r => !existingKeys.has(r.EMPNO))
-      return [...prev, ...newRows]
-    })
-    // setTab(1)
-    handleChangeIndex(1)
-    // }, [setTab])
-  }, [])
 
   /* ── Tab 1 이벤트 ── */
 
@@ -159,8 +156,10 @@ export default function Test0409Page() {
       return
     }
     const empRows = checkedRows.map(r => pickEmpColumns(r as unknown as Record<string, unknown>))
-    addToDetail(empRows)
-  }, [checkedRows, addToDetail])
+    setDetailRows(empRows)
+    setModifiedRows([])
+    handleChangeIndex(1)
+  }, [checkedRows])
 
   /* ── Tab 2 이벤트 ── */
 
