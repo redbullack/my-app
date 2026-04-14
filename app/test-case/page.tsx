@@ -53,11 +53,6 @@
  *   - 화면 에러 로그 Grid: C, D 케이스의 반환 결과
  * ───────────────────────────────────────────────────────────────────
  *
- * TailwindCSS:
- *   - flex, gap-*, p-*, rounded: 레이아웃
- *   - bg-[var(--color-bg-*)], text-[var(--color-text-*)]: 테마 대응 색상
- *   - border-[var(--color-border)]: 테마 대응 보더
- *   - dark: 변형 없이 CSS 변수로 다크 모드 자동 대응
  */
 
 import { useState, useCallback } from 'react'
@@ -126,14 +121,14 @@ const TYPE_OPTIONS: Record<string, { value: string; label: string }[]> = {
 }
 
 const GRID_COLUMNS = [
-  { name: 'NO',         header: 'No',         width: 50  },
-  { name: 'TIME',       header: '시각',        width: 90  },
-  { name: 'CATEGORY',   header: '카테고리',    width: 100 },
-  { name: 'CASE',       header: '케이스',      width: 80  },
-  { name: 'ERROR_TYPE', header: '에러 타입',   width: 160 },
-  { name: 'MESSAGE',    header: '메시지',      width: 280 },
-  { name: 'HANDLED_BY', header: '처리 위치',   width: 220 },
-  { name: 'DETAIL',     header: '상세',        width: 300 },
+  { name: 'NO', header: 'No', width: 50 },
+  { name: 'TIME', header: '시각', width: 90 },
+  { name: 'CATEGORY', header: '카테고리', width: 100 },
+  { name: 'CASE', header: '케이스', width: 80 },
+  { name: 'ERROR_TYPE', header: '에러 타입', width: 160 },
+  { name: 'MESSAGE', header: '메시지', width: 280 },
+  { name: 'HANDLED_BY', header: '처리 위치', width: 220 },
+  { name: 'DETAIL', header: '상세', width: 300 },
 ]
 
 /* ── 유틸 ──────────────────────────────────────────────────────────────────────*/
@@ -460,7 +455,7 @@ export default function TestCasePage() {
             <strong>방법 A:</strong> <code className="font-mono bg-amber-100 dark:bg-amber-900 px-1 rounded">app/layout.tsx</code> RootLayout 함수 최상단에 아래를 추가 후 브라우저 새로고침:
           </p>
           <pre className="mt-1 rounded bg-amber-100 dark:bg-amber-900 p-2 text-xs font-mono text-amber-800 dark:text-amber-200">
-{`throw new Error('global-error.tsx 테스트 — 완료 후 이 줄 삭제!')`}
+            {`throw new Error('global-error.tsx 테스트 — 완료 후 이 줄 삭제!')`}
           </pre>
           <p className="mt-2 text-amber-700 dark:text-amber-300">
             <strong>방법 B:</strong> ThemeProvider import를 깨진 경로로 변경하면 동일 효과.
