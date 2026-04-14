@@ -12,12 +12,6 @@
  * "다시 시도" 버튼을 누르면 reset()이 호출되어 에러 상태를 초기화하고
  * 원래 page.tsx를 다시 렌더링 시도한다.
  *
- * TailwindCSS:
- *   - flex / min-h-[60vh] / items-center / justify-center: 세로 중앙 정렬
- *   - max-w-lg: 카드 최대 너비
- *   - bg-[var(--color-bg-secondary)]: 테마 대응 배경
- *   - text-[var(--color-text-primary|secondary|muted)]: 테마 텍스트
- *   - border-[var(--color-border)]: 테마 대응 보더
  */
 'use client'
 

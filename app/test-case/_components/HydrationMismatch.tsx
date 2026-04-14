@@ -26,28 +26,19 @@
  *   - 개발 모드에서만 경고가 상세히 출력된다.
  *   - 프로덕션 빌드에서는 React가 조용히 클라이언트 값으로 덮어쓴다.
  *
- * TailwindCSS:
- *   - text-[var(--color-text-secondary)]: 보조 텍스트 색상 (테마 대응)
- *   - bg-[var(--color-bg-tertiary)]: 배경 (테마 대응)
- *   - rounded, p-3, text-xs: 기본 레이아웃
  */
 
-import { useState, useEffect } from 'react'
-
 export default function HydrationMismatch() {
-  // 서버: 고정값 렌더 → 클라이언트: Math.random() 으로 다른 값 렌더 → 불일치!
-  const [value, setValue] = useState<string>('서버에서 렌더된 고정값')
-
-  useEffect(() => {
-    // 클라이언트에서만 실행 — Math.random()으로 서버 값과 다른 값 설정
-    setValue(`클라이언트 값: ${Math.random().toFixed(6)}`)
-  }, [])
+  // JSX 본문에서 직접 서버/클라이언트 분기 → 첫 렌더 결과가 달라 hydration mismatch 발생
+  const renderedOn = typeof window === 'undefined' ? 'SERVER' : 'CLIENT'
+  const randomValue = Math.random().toFixed(6)
 
   return (
     <div className="rounded bg-[var(--color-bg-tertiary)] p-3 text-xs text-[var(--color-text-secondary)]">
-      <p className="font-semibold mb-1">B-3 Hydration Mismatch 컴포넌트</p>
+      <p className="font-semibold mb-1">B-2 Hydration Mismatch 컴포넌트</p>
       {/* 서버/클라이언트 값 불일치 유발 — suppressHydrationWarning 의도적으로 미사용 */}
-      <p>현재 값: {value}</p>
+      <p>렌더 위치: <strong>{renderedOn}</strong></p>
+      <p>랜덤 값: {randomValue}</p>
       <p className="mt-1 text-[var(--color-text-muted)]">
         ↑ DevTools Console에서 hydration 경고 확인 (개발 모드에서만 상세 출력)
       </p>

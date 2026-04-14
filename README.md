@@ -216,6 +216,32 @@ const data = use(dataPromise)  // reject 시 → 렌더링 에러 → error.tsx 
 - `traceId` 앞 8자리 (디버깅용)
 - `getClientLogger().error()` 호출로 구조화 로그 출력
 
+## 🧪 에러/예외 재현 테스트 페이지 (`/test-case`)
+
+Next.js 16 + React 19 환경에서 발생 가능한 **모든 에러 경로**를 실제로 트리거하여 처리 흐름을 관찰할 수 있는 종합 테스트 라우트입니다. (최근 커밋: `6b81fa5 test-case 페이지 추가 / instrumentation 파일 2개 추가`)
+
+### 구성
+
+- **`app/test-case/page.tsx`** — 카테고리(A: Server Action / B: 클라이언트 런타임 / C: Route Handler / D: Fetch 실패) × 케이스 × 에러 타입 드롭다운을 선택해 버튼 한 번으로 해당 시나리오를 재현. 실행 결과를 하단 Grid(`CompGrid`)에 NO/시각/카테고리/케이스/에러 타입/메시지/처리 위치/상세 컬럼으로 누적 기록
+- **`app/test-case/_actions/index.ts`** — Server Action 전용 에러 재현 집합 (`'use server'`): DB 카테고리별 `DbError` throw, unknown 에러, Promise reject, sync throw 등. 클라이언트에서 `try/catch` + `throwError()`로 `error.tsx`까지 전파
+- **`app/test-case/_components/HydrationMismatch.tsx`** — `typeof window` / `Math.random()`을 JSX 본문에서 직접 사용해 서버/클라이언트 첫 렌더 결과가 달라지도록 구성 → React 19 `onRecoverableError` 경고 유발 (recoverable)
+- **`app/test-case/_components/ThrowOnRender.tsx`** — 렌더 단계에서 즉시 throw하여 가장 가까운 `error.tsx`(Error Boundary)로 강제 전파
+- **`app/test-case/api/route.ts`** — Route Handler 레벨 에러 재현 (`?case=...`): 400/401/403/404/409/500, JSON 파싱 실패, timeout, DB 에러 변환 등
+- **`app/test-case/error.tsx`** — test-case 전용 Error Boundary. `ClientError` 인식 시 category/traceId/devMessage 표시, `reset()` 버튼 제공
+- **`app/test-case/b2/page.tsx`** — B-2 Hydration Mismatch **전용 재현 라우트**. 메인 `/test-case`에서 진입 시 이미 hydrated 상태라 경고가 나지 않는 문제를 해결하기 위해, 서버 렌더부터 mismatch가 발생하는 독립 페이지로 분리. `/test-case/b2` 직접 진입/새로고침 시 DevTools Console에서 "Hydration failed..." 경고 확인 가능
+
+### Instrumentation 2종 (루트 예제)
+
+- **`_instrumentation.ts`** — Next.js `register()` / `onRequestError()` 훅 예제. 서버 에러 중앙 수집·외부 APM(Sentry/Datadog) 연동·traceId 발급 패턴을 주석으로 문서화
+- **`_instrumentation-client.ts`** — 클라이언트 부팅 시점의 전역 리스너 초기화 예제 (`window.onerror`, `unhandledrejection`, React `onRecoverableError`)
+
+두 파일 모두 현재는 `_` 프리픽스로 비활성화 상태이며, 실제 활성화 시 프로젝트 루트의 `instrumentation.ts` / `instrumentation-client.ts`로 리네임해 사용합니다.
+
+### 부수 변경
+
+- **`components/providers/GlobalErrorCatcher.tsx`** — 클라이언트 전역 에러/rejection을 캐치해 `getClientLogger().error()`로 구조화 로깅 후 선택적으로 error.tsx까지 전파
+- 문서화 주석 정리: `app/test-case/page.tsx`, `error.tsx`, `HydrationMismatch.tsx` 상단의 장황한 TailwindCSS 설명 주석을 제거해 본문 주석을 간결화
+
 ## 🔐 인증 시스템
 
 ### next-auth Credentials 인증
