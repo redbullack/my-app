@@ -24,7 +24,9 @@ import {
   type EmpRow,
   type EmpUpdateRow,
 } from './_actions/main'
-import { useErrorHandler } from '@/lib/hooks/useErrorHandler'
+import { useAction } from '@/lib/utils/client/useAction'
+import { toast } from '@/components/control/Toast'
+import type { ActionResponse } from '@/lib/utils/type'
 
 /* ── EMP 테이블 컬럼만 추출 ── */
 
@@ -72,7 +74,7 @@ interface CondValues {
 }
 
 export default function Test0409Page() {
-  const { throwError } = useErrorHandler()
+  const { execute } = useAction()
   const searchParams = useSearchParams()
   const router = useRouter()
   const tabIndex = Number(searchParams.get('tab') ?? '0')
@@ -90,7 +92,9 @@ export default function Test0409Page() {
   const [condValues, setCondValues] = useState<CondValues>({ dname: [], job: [], ename: [] })
 
   /* ── Tab 1: Grid 데이터 ── */
-  const [gridDataSource, setGridDataSource] = useState<EmpRow[] | Promise<EmpRow[]> | (() => Promise<EmpRow[]>)>([])
+  const [gridDataSource, setGridDataSource] = useState<
+    EmpRow[] | (() => Promise<ActionResponse<EmpRow[]>>)
+  >([])
   const [checkedRows, setCheckedRows] = useState<EmpRow[]>([])
 
   /* ── Tab 2: Detail Grid 데이터 ── */
@@ -101,9 +105,12 @@ export default function Test0409Page() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
 
-  /* ── Cascade DataSource ── */
+  /* ── Cascade DataSource — Input/Grid 가 envelope 를 직접 언래핑한다 ── */
   const dnameDataSource = useCallback(() => fetchDnameOptions(), [])
-  const jobDataSource = useCallback(() => fetchJobOptions(condValues.dname), [condValues.dname])
+  const jobDataSource = useCallback(
+    () => fetchJobOptions(condValues.dname),
+    [condValues.dname],
+  )
   const enameDataSource = useCallback(
     () => fetchEnameOptions(condValues.dname, condValues.job),
     [condValues.dname, condValues.job],
@@ -120,23 +127,16 @@ export default function Test0409Page() {
     })
   }, [])
 
-  const handleSearchClick = useCallback(async () => {
-    // throwError(new Error('수동 에러 입니다 ~ ~~  ~ ~ !'))
-    // throw Error('수동 에러 입니다 ~ ~~  ~ ~ !')
-
+  const handleSearchClick = useCallback(() => {
     const cond: EmpSearchCond = { ...condValues }
 
-    // setGridDataSource(fetchEmpList(cond))
-
-    setGridDataSource(() => fetchEmpList.bind(null, cond))
-
-    // const rst = await fetchEmpList(cond);
-    // setGridDataSource(rst)
+    // Grid 가 ActionResponse envelope 를 직접 언래핑한다.
+    // 실패 시 unwrapEnvelope → handleGlobalError 로 자동 라우팅.
+    setGridDataSource(() => () => fetchEmpList(cond))
 
     setCheckedRows([])
     setDetailRows([])
     setModifiedRows([])
-    // setTab(0)
     handleChangeIndex(0)
   }, [condValues])
 
@@ -152,48 +152,48 @@ export default function Test0409Page() {
 
   const handleSelectEdit = useCallback(() => {
     if (checkedRows.length === 0) {
-      alert('편집할 행을 체크하세요.')
+      toast('편집할 행을 체크하세요.', { variant: 'warning' })
       return
     }
     const empRows = checkedRows.map(r => pickEmpColumns(r as unknown as Record<string, unknown>))
     setDetailRows(empRows)
     setModifiedRows([])
     handleChangeIndex(1)
-  }, [checkedRows])
+  }, [checkedRows, toast])
 
   /* ── Tab 2 이벤트 ── */
 
   const handleSaveClick = useCallback(() => {
     if (modifiedRows.length === 0) {
-      alert('변경된 내용이 없습니다.')
+      toast('변경된 내용이 없습니다.', { variant: 'info' })
       return
     }
     setIsModalOpen(true)
-  }, [modifiedRows])
+  }, [modifiedRows, toast])
 
-  const handleConfirmSave = useCallback(async () => {
+  /**
+   * useAction.execute 가 envelope 를 자동 언래핑하고 실패 시 handleGlobalError 로 라우팅.
+   * 개발자는 try/catch·에러 분기·로깅을 쓰지 않는다.
+   */
+  const handleConfirmSave = useCallback(() => {
+    const updateRows: EmpUpdateRow[] = modifiedRows.map(m => {
+      const rd = m.rowData as Record<string, unknown>
+      return {
+        EMPNO: String(rd.EMPNO ?? m.rowKey),
+        ENAME: rd.ENAME != null ? String(rd.ENAME) : null,
+        SAL: rd.SAL != null ? String(rd.SAL) : null,
+        COMM: rd.COMM != null ? String(rd.COMM) : null,
+      }
+    })
     setIsSaving(true)
-    try {
-      const updateRows: EmpUpdateRow[] = modifiedRows.map(m => {
-        const rd = m.rowData as Record<string, unknown>
-        return {
-          EMPNO: String(rd.EMPNO ?? m.rowKey),
-          ENAME: rd.ENAME != null ? String(rd.ENAME) : null,
-          SAL: rd.SAL != null ? String(rd.SAL) : null,
-          COMM: rd.COMM != null ? String(rd.COMM) : null,
-        }
-      })
-      const result = await updateEmpRows(updateRows)
-      alert(`${result.updated}건 수정 완료`)
-      // Grid가 resetData 시 자동으로 스냅샷 갱신하므로 detailRows를 다시 set
-      setDetailRows(prev => [...prev])
-      setIsModalOpen(false)
-    } catch (err) {
-      alert('수정 실패: ' + (err instanceof Error ? err.message : String(err)))
-    } finally {
-      setIsSaving(false)
-    }
-  }, [modifiedRows])
+    void execute(() => updateEmpRows(updateRows), {
+      onSuccess: ({ updated }) => {
+        toast(`${updated}건 수정 완료`, { variant: 'success' })
+        setDetailRows(prev => [...prev])
+        setIsModalOpen(false)
+      },
+    }).finally(() => setIsSaving(false))
+  }, [modifiedRows, execute])
 
   const COLUMN_LABELS: Record<string, string> = { ENAME: '이름', SAL: '급여', COMM: '커미션' }
 
