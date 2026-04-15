@@ -18,6 +18,9 @@
 import { Suspense, use, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import type { GridEventName, OptColumn, OptRow, OptRowHeader } from 'tui-grid/types/options'
 import { cn } from '@/lib/utils'
+import { ErrorBoundary } from '@/components/shared/ErrorBoundary'
+import { handleGlobalError } from '@/lib/utils/client/globalErrorHandler'
+import type { ActionResponse } from '@/lib/utils/type'
 
 /* ── 타입 ── */
 
@@ -25,7 +28,26 @@ type Row = Record<string, unknown>
 type DataSource<T extends object = Row> =
   | T[]
   | Promise<T[]>
-  | (() => T[] | Promise<T[]>)
+  | Promise<ActionResponse<T[]>>
+  | (() => T[] | Promise<T[]> | Promise<ActionResponse<T[]>>)
+
+/** resolve된 값이 ActionResponse envelope인지 판별. */
+function isActionResponse<T>(v: unknown): v is ActionResponse<T> {
+  return typeof v === 'object' && v !== null && 'isSuccess' in v
+}
+
+/**
+ * envelope 이면 언래핑, 아니면 그대로 반환. 실패 시 handleGlobalError + throw.
+ * Grid 내부 Promise 체인에서 사용 → 실패 시 Suspense 바운더리의 ErrorBoundary 가 받는다.
+ */
+function unwrapEnvelope<T extends object>(value: T[] | ActionResponse<T[]>): T[] {
+  if (isActionResponse<T[]>(value)) {
+    if (value.isSuccess) return value.data
+    handleGlobalError(value.error)
+    throw new Error(value.error.message)
+  }
+  return value
+}
 
 interface GridColumn {
   name: string
@@ -142,6 +164,14 @@ interface GridProps<T extends object = Row> {
   onAfterChange?: (ev: { changes: Array<{ rowKey: number | string; columnName: string; value: unknown }> }) => void
   /** editable 모드에서 변경된 행 목록을 자동 추적하여 콜백으로 전달 (before/after 포함) */
   onModifiedRows?: (rows: ModifiedRow[]) => void
+  /**
+   * dataSource 실패 시 호출되는 콜백.
+   * 미지정 시 기본 동작은 ErrorBus로 report (카테고리 정책 기반 Toast/Modal/Boundary 자동 분기).
+   * 명시하면 override 된다.
+   */
+  onError?: (error: Error) => void
+  /** onError를 override할 때 폴백 UI. 미지정 시 빈 div 렌더. */
+  errorFallback?: ReactNode
 }
 
 interface ModifiedRow {
@@ -179,16 +209,19 @@ function GridContent({
   // [수정] useRef는 suspend 재시도에서도 유지되므로 동일 Promise 참조를 보장
   const resourceRef = useRef<{ key: unknown; value: Row[] | Promise<Row[]> }>({ key: undefined, value: [] })
   if (resourceRef.current.key !== dataSource) {
+    const raw: Row[] | Promise<Row[] | ActionResponse<Row[]>> =
+      typeof dataSource === 'function'
+        // Server Action은 렌더 중 호출 시 Router setState 경고 발생 → microtask로 지연
+        ? Promise.resolve().then(() => dataSource() as Row[] | Promise<Row[] | ActionResponse<Row[]>>)
+        : (dataSource as Row[] | Promise<Row[] | ActionResponse<Row[]>>)
+
     resourceRef.current = {
       key: dataSource,
-      // Server Action은 렌더 중 호출 시 Router setState 경고 발생 → microtask로 지연
-      value: typeof dataSource === 'function'
-        ? Promise.resolve().then(() => dataSource() as Row[] | Promise<Row[]>)
-        : dataSource,
+      // envelope 이면 언래핑, 아니면 그대로. 실패 시 throw → Suspense 외곽 ErrorBoundary 로 전파.
+      value: raw instanceof Promise ? raw.then(unwrapEnvelope) : raw,
     }
   }
   const resource = resourceRef.current.value
-  console.log(`CLIENT: Grid.tsx - resourceRef.current.key: ${resourceRef.current.key}, resourceRef.current.value: ${resourceRef.current.value}`)
   const data: Row[] = resource instanceof Promise ? use(resource) : resource
 
   const resolvedColumns = useMemo(
@@ -415,12 +448,25 @@ function GridContent({
 /* ── Grid: Suspense 래퍼 ── */
 
 function Grid<T extends object = Row>(props: GridProps<T>) {
-  const { height, className } = props
+  const { height, className, onError, errorFallback, dataSource } = props
+
+  const handleError = (error: Error) => {
+    if (onError) onError(error)
+    // 기본 동작: 이미 unwrapEnvelope 에서 handleGlobalError 가 호출됐으므로
+    // 일반 렌더 에러만 여기서 추가 처리한다.
+    else handleGlobalError(error)
+  }
 
   return (
+    // <ErrorBoundary
+    //   resetKey={dataSource}
+    //   fallback={errorFallback ?? <GridSkeleton height={height} className={className} rowCount={0} />}
+    //   onError={handleError}
+    // >
     <Suspense fallback={<GridSkeleton height={height} className={className} />}>
       <GridContent {...(props as GridContentProps)} />
     </Suspense>
+    // </ErrorBoundary>
   )
 }
 

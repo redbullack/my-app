@@ -5,15 +5,16 @@
  * `app/test-0409/page.tsx` 전용 Server Actions.
  * - SCOTT.EMP / DEPT / SALGRADE 조인 결과 조회
  * - DNAME → JOB → ENAME 의 cascade 셀렉트 옵션 조회 (FROM DUAL)
- * - 모든 메서드는 쿼리 실행 전 1.2초 딜레이를 갖는다 (학습용)
+ *
+ * 모든 export는 `actionAgent` 로 감싸 `ActionResponse<T>` envelope 를 반환한다.
+ * 개발자는 내부 구현에서 try/catch 를 사용하지 않는다. DbError 는 withLifecycle 이,
+ * envelope 변환은 래퍼가 담당한다.
  */
 
 import { getDb } from '@/lib/db'
+import { actionAgent } from '@/lib/utils/server/actionWrapper'
 
 const db = getDb('MAIN')
-
-const DELAY_MS = 1200
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 /* ── 조회 결과 타입 ── */
 
@@ -41,61 +42,60 @@ export interface EmpSearchCond {
  * Grid 조회
  * ────────────────────────────────────────────────*/
 
-export async function fetchEmpList(cond: EmpSearchCond): Promise<EmpRow[]> {
-  // await sleep(DELAY_MS)
+export const fetchEmpList = async (cond: EmpSearchCond) =>
+  actionAgent('fetchEmpList', async (): Promise<EmpRow[]> => {
+    const binds: Record<string, unknown> = {}
+    const where: string[] = ['1 = 1']
 
-  const binds: Record<string, unknown> = {}
-  const where: string[] = ['1 = 1']
+    if (cond.dname.length > 0) {
+      const keys = cond.dname.map((v, i) => {
+        const k = `dname${i}`
+        binds[k] = v
+        return `:${k}`
+      })
+      where.push(`DEPT.DNAME IN (${keys.join(', ')})`)
+    }
+    if (cond.job.length > 0) {
+      const keys = cond.job.map((v, i) => {
+        const k = `job${i}`
+        binds[k] = v
+        return `:${k}`
+      })
+      where.push(`EMP.JOB IN (${keys.join(', ')})`)
+    }
+    if (cond.ename.length > 0) {
+      const keys = cond.ename.map((v, i) => {
+        const k = `ename${i}`
+        binds[k] = v
+        return `:${k}`
+      })
+      where.push(`EMP.ENAME IN (${keys.join(', ')})`)
+    }
 
-  if (cond.dname.length > 0) {
-    const keys = cond.dname.map((v, i) => {
-      const k = `dname${i}`
-      binds[k] = v
-      return `:${k}`
-    })
-    where.push(`DEPT.DNAME IN (${keys.join(', ')})`)
-  }
-  if (cond.job.length > 0) {
-    const keys = cond.job.map((v, i) => {
-      const k = `job${i}`
-      binds[k] = v
-      return `:${k}`
-    })
-    where.push(`EMP.JOB IN (${keys.join(', ')})`)
-  }
-  if (cond.ename.length > 0) {
-    const keys = cond.ename.map((v, i) => {
-      const k = `ename${i}`
-      binds[k] = v
-      return `:${k}`
-    })
-    where.push(`EMP.ENAME IN (${keys.join(', ')})`)
-  }
-
-  return db.query<EmpRow>(
-    `
-    SELECT TO_CHAR(EMP.EMPNO)    AS "EMPNO"
-         , EMP.ENAME             AS "ENAME"
-         , EMP.JOB               AS "JOB"
-         , TO_CHAR(EMP.MGR)      AS "MGR"
-         , TO_CHAR(EMP.HIREDATE, 'YYYY-MM-DD') AS "HIREDATE"
-         , TO_CHAR(EMP.SAL)      AS "SAL"
-         , TO_CHAR(SALGRADE.GRADE) AS "GRADE"
-         , TO_CHAR(EMP.COMM)     AS "COMM"
-         , TO_CHAR(EMP.DEPTNO)   AS "DEPTNO"
-         , DEPT.DNAME            AS "DNAME"
-         , DEPT.LOC              AS "LOC"
-      FROM SCOTT.EMP
-      LEFT JOIN SCOTT.DEPT
-        ON DEPT.DEPTNO = EMP.DEPTNO
-      LEFT JOIN SCOTT.SALGRADE
-        ON EMP.SAL >= SALGRADE.LOSAL AND EMP.SAL <= SALGRADE.HISAL
-     WHERE ${where.join(' AND ')}
-     ORDER BY EMP.EMPNO
-    `,
-    binds,
-  )
-}
+    return db.query<EmpRow>(
+      `
+      SELECT TO_CHAR(EMP.EMPNO)    AS "EMPNO"
+           , EMP.ENAME             AS "ENAME"
+           , EMP.JOB               AS "JOB"
+           , TO_CHAR(EMP.MGR)      AS "MGR"
+           , TO_CHAR(EMP.HIREDATE, 'YYYY-MM-DD') AS "HIREDATE"
+           , TO_CHAR(EMP.SAL)      AS "SAL"
+           , TO_CHAR(SALGRADE.GRADE) AS "GRADE"
+           , TO_CHAR(EMP.COMM)     AS "COMM"
+           , TO_CHAR(EMP.DEPTNO)   AS "DEPTNO"
+           , DEPT.DNAME            AS "DNAME"
+           , DEPT.LOC              AS "LOC"
+        FROM SCOTT.EMP_XXX
+        LEFT JOIN SCOTT.DEPT
+          ON DEPT.DEPTNO = EMP.DEPTNO
+        LEFT JOIN SCOTT.SALGRADE
+          ON EMP.SAL >= SALGRADE.LOSAL AND EMP.SAL <= SALGRADE.HISAL
+       WHERE ${where.join(' AND ')}
+       ORDER BY EMP.EMPNO
+      `,
+      binds,
+    )
+  })
 
 /* ────────────────────────────────────────────────
  * Cascade Select 옵션 조회 (FROM DUAL)
@@ -137,58 +137,58 @@ function buildInClause(
 }
 
 /** DNAME 옵션 — cascade 의존성 없음 */
-export async function fetchDnameOptions(): Promise<string[]> {
-  // await sleep(DELAY_MS)
-  const rows = await db.query<{ VALUE: string }>(
-    `
-    SELECT DISTINCT DNAME AS "VALUE"
-      FROM (${EMP_INLINE_VIEW})
-     ORDER BY DNAME
-    `,
-  )
-  return rows.map(r => r.VALUE)
-}
+export const fetchDnameOptions = async () =>
+  actionAgent('fetchDnameOptions', async (): Promise<string[]> => {
+    const rows = await db.query<{ VALUE: string }>(
+      `
+      SELECT DISTINCT DNAME AS "VALUE"
+        FROM (${EMP_INLINE_VIEW})
+       ORDER BY DNAME
+      `,
+    )
+    return rows.map(r => r.VALUE)
+  })
 
 /** JOB 옵션 — DNAME에 cascade */
-export async function fetchJobOptions(selectedDname: string[]): Promise<string[]> {
-  // await sleep(DELAY_MS)
-  const binds: Record<string, unknown> = {}
-  const where = buildInClause('DNAME', selectedDname, 'dname', binds)
-  const rows = await db.query<{ VALUE: string }>(
-    `
-    SELECT DISTINCT JOB AS "VALUE"
-      FROM (${EMP_INLINE_VIEW})
-     ${where ? `WHERE ${where}` : ''}
-     ORDER BY JOB
-    `,
-    binds,
-  )
-  return rows.map(r => r.VALUE)
-}
+export const fetchJobOptions = async (selectedDname: string[]) =>
+  actionAgent('fetchJobOptions', async (): Promise<string[]> => {
+    const binds: Record<string, unknown> = {}
+    const where = buildInClause('DNAME', selectedDname, 'dname', binds)
+    const rows = await db.query<{ VALUE: string }>(
+      `
+      SELECT DISTINCT JOB AS "VALUE"
+        FROM (${EMP_INLINE_VIEW})
+       ${where ? `WHERE ${where}` : ''}
+       ORDER BY JOB
+      `,
+      binds,
+    )
+    return rows.map(r => r.VALUE)
+  })
 
 /** ENAME 옵션 — DNAME + JOB에 cascade */
-export async function fetchEnameOptions(
+export const fetchEnameOptions = async (
   selectedDname: string[],
   selectedJob: string[],
-): Promise<string[]> {
-  await sleep(DELAY_MS)
-  const binds: Record<string, unknown> = {}
-  const conds = [
-    buildInClause('DNAME', selectedDname, 'dname', binds),
-    buildInClause('JOB', selectedJob, 'job', binds),
-  ].filter((c): c is string => c !== null)
+) =>
+  actionAgent('fetchEnameOptions', async (): Promise<string[]> => {
+    const binds: Record<string, unknown> = {}
+    const conds = [
+      buildInClause('DNAME', selectedDname, 'dname', binds),
+      buildInClause('JOB', selectedJob, 'job', binds),
+    ].filter((c): c is string => c !== null)
 
-  const rows = await db.query<{ VALUE: string }>(
-    `
-    SELECT DISTINCT ENAME AS "VALUE"
-      FROM (${EMP_INLINE_VIEW})
-     ${conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : ''}
-     ORDER BY ENAME
-    `,
-    binds,
-  )
-  return rows.map(r => r.VALUE)
-}
+    const rows = await db.query<{ VALUE: string }>(
+      `
+      SELECT DISTINCT ENAME AS "VALUE"
+        FROM (${EMP_INLINE_VIEW})
+       ${conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : ''}
+       ORDER BY ENAME
+      `,
+      binds,
+    )
+    return rows.map(r => r.VALUE)
+  })
 
 /* ────────────────────────────────────────────────
  * EMP 수정 (UPDATE)
@@ -201,27 +201,29 @@ export interface EmpUpdateRow {
   COMM: string | null
 }
 
-export async function updateEmpRows(
-  rows: EmpUpdateRow[],
-): Promise<{ success: boolean; updated: number }> {
-  let updated = 0
-  for (const row of rows) {
-    await db.execute(
-      `
-      UPDATE SCOTT.EMP
-         SET ENAME = :ename
-           , SAL   = :sal
-           , COMM  = :comm
-       WHERE EMPNO = :empno
-      `,
-      {
-        ename: row.ENAME,
-        sal: row.SAL ? Number(row.SAL) : null,
-        comm: row.COMM ? Number(row.COMM) : null,
-        empno: Number(row.EMPNO),
-      },
-    )
-    updated++
-  }
-  return { success: true, updated }
-}
+export const updateEmpRows = async (rows: EmpUpdateRow[]) =>
+  actionAgent(
+    'updateEmpRows',
+    async (): Promise<{ success: boolean; updated: number }> => {
+      let updated = 0
+      for (const row of rows) {
+        await db.execute(
+          `
+        UPDATE SCOTT.EMP
+           SET ENAME = :ename
+             , SAL   = :sal
+             , COMM  = :comm
+         WHERE EMPNO = :empno
+        `,
+          {
+            ename: row.ENAME,
+            sal: row.SAL ? Number(row.SAL) : null,
+            comm: row.COMM ? Number(row.COMM) : null,
+            empno: Number(row.EMPNO),
+          },
+        )
+        updated++
+      }
+      return { success: true, updated }
+    },
+  )
