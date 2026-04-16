@@ -1,12 +1,15 @@
 /**
  * @module lib/utils/client/globalErrorHandler
  * @description
- * 실패한 ActionResponse.error 또는 일반 Error를 받아 AppError 분류에 따라
- * Toast를 띄우는 단일 진입점. 팀원은 직접 이 함수를 호출하지 않는다 —
+ * AppError 또는 일반 Error를 받아 분류에 따라 Toast를 띄우는 단일 진입점.
+ * 팀원은 직접 이 함수를 호출하지 않는다 —
  * useAction 또는 Grid/Input의 envelope 언래핑 로직이 실패 시 자동으로 호출한다.
+ *
+ * useAction이 ActionError(plain object) → AppError(class)로 복원한 뒤 넘기므로,
+ * 이 함수는 AppError와 일반 Error만 처리하면 된다.
  */
 import { toast, type ToastVariant } from '@/components/control/Toast'
-import type { AppError, ErrorType } from '../type'
+import { AppError, type ErrorType } from '../type'
 
 const VARIANT_BY_TYPE: Record<ErrorType, ToastVariant> = {
     validation: 'warning',
@@ -30,23 +33,15 @@ const TITLE_BY_TYPE: Record<ErrorType, string | undefined> = {
     unknown: '오류',
 }
 
-function isAppError(err: unknown): err is AppError {
-    return (
-        typeof err === 'object' &&
-        err !== null &&
-        'type' in err &&
-        'message' in err &&
-        'traceId' in err
-    )
-}
-
 /**
  * AppError 또는 일반 Error를 받아 UI 피드백을 출력한다.
  * - AppError: 카테고리별 variant/title/traceId 표시
  * - 일반 Error: 'unknown' 기본 분기
  */
 export function handleGlobalError(error: AppError | Error | unknown): void {
-    if (isAppError(error)) {
+    console.log(`CLIENT: 여기는 handleGlobalError 입니다. isError: ${error instanceof Error}, error: ${error}`)
+    if (error instanceof AppError) {
+        console.log(`CLIENT: 여기는 AppError 입니다. error.message: ${error.message}`)
         toast(error.message, {
             variant: VARIANT_BY_TYPE[error.type],
             title: TITLE_BY_TYPE[error.type],

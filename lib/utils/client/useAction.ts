@@ -16,17 +16,13 @@
  *   })
  */
 import { useCallback, useState } from 'react'
-import type { ActionResponse } from '../type'
+import { AppError, type ActionResponse } from '../type'
 import { handleGlobalError } from './globalErrorHandler'
 
 interface ExecuteOptions<T> {
     onSuccess?: (data: T) => void
     /** 반환값이 'handled' 면 전역 에러 핸들러 호출을 스킵한다. */
-    onError?: (
-        error: ActionResponse<T> extends { isSuccess: false; error: infer E }
-            ? E
-            : never,
-    ) => 'handled' | void
+    onError?: (error: AppError) => 'handled' | void
     /** true 면 실패 시 전역 토스트를 띄우지 않는다. */
     silent?: boolean
 }
@@ -46,11 +42,10 @@ export function useAction() {
                     opts.onSuccess?.(result.data)
                     return
                 }
-                const handled = opts.onError?.(
-                    result.error as Parameters<NonNullable<typeof opts.onError>>[0],
-                )
+                const appError = new AppError(result.error)
+                const handled = opts.onError?.(appError)
                 if (handled === 'handled' || opts.silent) return
-                handleGlobalError(result.error)
+                handleGlobalError(appError)
             } catch (err: unknown) {
                 if (opts.silent) return
                 handleGlobalError(
