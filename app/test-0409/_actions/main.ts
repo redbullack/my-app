@@ -85,7 +85,7 @@ export const fetchEmpList = async (cond: EmpSearchCond) =>
            , TO_CHAR(EMP.DEPTNO)   AS "DEPTNO"
            , DEPT.DNAME            AS "DNAME"
            , DEPT.LOC              AS "LOC"
-        FROM SCOTT.EMP_XXX
+        FROM SCOTT.EMP
         LEFT JOIN SCOTT.DEPT
           ON DEPT.DEPTNO = EMP.DEPTNO
         LEFT JOIN SCOTT.SALGRADE

@@ -7,7 +7,7 @@
  *
  * onCaughtError 케이스(B-1):
  *   ThrowOnRender 컴포넌트가 마운트 → throw → 이 경계가 catch
- *   → 이 UI 렌더 + Console에 client.boundary 로그 출력
+ *   → 이 UI 렌더 + Console에 에러 로그 출력
  *
  * "다시 시도" 버튼을 누르면 reset()이 호출되어 에러 상태를 초기화하고
  * 원래 page.tsx를 다시 렌더링 시도한다.
@@ -17,8 +17,7 @@
 
 import { useEffect } from 'react'
 import { Button, Panel, Badge } from '@/components/control'
-import { ClientError } from '@/lib/errors/client-errors'
-import { getClientLogger } from '@/lib/errors/client-logger'
+import { AppError } from '@/lib/utils/type'
 
 export default function TestCaseError({
   error,
@@ -27,19 +26,18 @@ export default function TestCaseError({
   error: Error & { digest?: string }
   reset: () => void
 }) {
-  const isClientError = error instanceof ClientError
+  const isAppError = error instanceof AppError
 
   useEffect(() => {
-    // client.boundary 이벤트로 구조화 로깅
-    getClientLogger().error('client.boundary', {
+    console.error('[ErrorBoundary:test-case]', {
       scope: 'test-case/error.tsx',
-      category: isClientError ? (error as ClientError).category : 'render',
-      traceId: isClientError ? (error as ClientError).traceId : crypto.randomUUID(),
+      type: isAppError ? (error as AppError).type : 'render',
+      traceId: isAppError ? (error as AppError).traceId : undefined,
       message: error.message,
       digest: error.digest,
-      devMessage: isClientError ? (error as ClientError).devMessage : error.stack,
+      devMessage: isAppError ? (error as AppError).devMessage : error.stack,
     })
-  }, [error, isClientError])
+  }, [error, isAppError])
 
   return (
     <div className="flex min-h-[60vh] items-center justify-center px-4">
@@ -54,11 +52,11 @@ export default function TestCaseError({
           Error Boundary가 에러를 catch했습니다
         </h1>
 
-        {isClientError && (
+        {isAppError && (
           <div className="mt-2 flex items-center justify-center gap-2">
-            <Badge variant="error">{(error as ClientError).category}</Badge>
+            <Badge variant="error">{(error as AppError).type}</Badge>
             <span className="font-mono text-xs text-[var(--color-text-muted)]">
-              traceId: {(error as ClientError).traceId.slice(0, 8)}
+              traceId: {(error as AppError).traceId.slice(0, 8)}
             </span>
           </div>
         )}
@@ -74,7 +72,7 @@ export default function TestCaseError({
         <div className="mt-4 rounded bg-[var(--color-bg-tertiary)] p-3 text-left text-xs text-[var(--color-text-muted)]">
           <p className="font-semibold mb-1">확인 방법:</p>
           <p>1. 이 화면이 표시됨 → test-case/error.tsx 가 에러를 catch했음 (onCaughtError)</p>
-          <p>2. DevTools Console → client.boundary JSON 로그 확인</p>
+          <p>2. DevTools Console → 에러 로그 확인</p>
           <p>3. "다시 시도" 버튼으로 reset → page.tsx 재마운트</p>
         </div>
 

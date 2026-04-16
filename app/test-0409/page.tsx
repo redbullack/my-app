@@ -9,7 +9,7 @@
  */
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { Input, SearchPanel, Grid, Panel, Button, Tab, TabSub, Modal } from '@/components/control'
 import type { GridColumn, ModifiedRow } from '@/components/control/Grid'
@@ -133,6 +133,13 @@ export default function Test0409Page() {
     // Grid 가 ActionResponse envelope 를 직접 언래핑한다.
     // 실패 시 unwrapEnvelope → handleGlobalError 로 자동 라우팅.
     setGridDataSource(() => () => fetchEmpList(cond))
+    // setGridDataSource(() => fetchEmpList.bind(null, cond))
+    // fetchEmpList(cond).then(res => {
+    //   if (res.isSuccess) {
+    //     return res.data
+    //   }
+    //   throw new Error(res.error.message)
+    // })
 
     setCheckedRows([])
     setDetailRows([])
@@ -196,6 +203,27 @@ export default function Test0409Page() {
   }, [modifiedRows, execute])
 
   const COLUMN_LABELS: Record<string, string> = { ENAME: '이름', SAL: '급여', COMM: '커미션' }
+
+  useEffect(() => {
+    // execute(() => fetchEmpList({ dname: [], ename: [], job: [] }), {
+    //   onError: (err) => {
+    //     console.log('Custom handled error:', err)
+    //     return 'handled'
+    //   },
+    // })
+
+    // handleSearchClick()
+
+    // execute(() => fetchEmpList({ dname: [], ename: [], job: [] }), {
+    //   onSuccess: (data) => {
+    //     setGridDataSource(data)
+    //   },
+    //   onError(error) {
+    //     alert('Custom handled error: ' + error)
+    //     return 'handled'
+    //   },
+    // })
+  }, [])
 
   return (
     <main className="min-h-screen bg-bg-primary px-4 py-6">

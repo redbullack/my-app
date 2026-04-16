@@ -20,7 +20,7 @@ import type { GridEventName, OptColumn, OptRow, OptRowHeader } from 'tui-grid/ty
 import { cn } from '@/lib/utils'
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary'
 import { handleGlobalError } from '@/lib/utils/client/globalErrorHandler'
-import type { ActionResponse } from '@/lib/utils/type'
+import { AppError, type ActionResponse } from '@/lib/utils/type'
 
 /* ── 타입 ── */
 
@@ -43,7 +43,7 @@ function isActionResponse<T>(v: unknown): v is ActionResponse<T> {
 function unwrapEnvelope<T extends object>(value: T[] | ActionResponse<T[]>): T[] {
   if (isActionResponse<T[]>(value)) {
     if (value.isSuccess) return value.data
-    handleGlobalError(value.error)
+    handleGlobalError(new AppError(value.error))
     throw new Error(value.error.message)
   }
   return value

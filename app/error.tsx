@@ -12,8 +12,7 @@
 
 import { useEffect } from 'react'
 import { Button, Panel, Badge } from '@/components/control'
-import { ClientError } from '@/lib/errors/client-errors'
-import { getClientLogger } from '@/lib/errors/client-logger'
+import { AppError } from '@/lib/utils/type'
 
 export default function GlobalError({
   error,
@@ -22,27 +21,27 @@ export default function GlobalError({
   error: Error & { digest?: string }
   reset: () => void
 }) {
-  const isClientError = error instanceof ClientError
+  const isAppError = error instanceof AppError
 
   useEffect(() => {
-    if (isClientError) {
-      getClientLogger().error('client.boundary', {
-        category: (error as ClientError).category,
-        traceId: (error as ClientError).traceId,
-        devMessage: (error as ClientError).devMessage,
-      })
+    if (isAppError) {
+      console.error(
+        `[AppError:${(error as AppError).type}] ${(error as AppError).traceId} — ${(error as AppError).devMessage ?? error.message}`,
+      )
+    } else {
+      console.error('[ErrorBoundary]', error)
     }
-  }, [error, isClientError])
+  }, [error, isAppError])
 
   return (
     <div className="flex min-h-[60vh] items-center justify-center px-4">
       <Panel variant="outlined" className="max-w-md text-center">
         <h1 className="text-2xl font-bold text-error">오류가 발생했습니다</h1>
-        {isClientError && (
+        {isAppError && (
           <div className="mt-2 flex items-center justify-center gap-2">
-            <Badge variant="error">{(error as ClientError).category}</Badge>
+            <Badge variant="error">{(error as AppError).type}</Badge>
             <span className="text-xs text-text-muted font-mono">
-              {(error as ClientError).traceId.slice(0, 8)}
+              {(error as AppError).traceId.slice(0, 8)}
             </span>
           </div>
         )}
