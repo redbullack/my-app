@@ -236,3 +236,59 @@ DbError의 필드가 클라이언트까지 어떻게 전달되는지:
 - **팀원 편의**: actionAgent가 모든 에러를 envelope로 감싸므로 Server Action 내부에 try/catch 불필요
 - **중복 로깅 방지**: DbError는 withLifecycle에서 1회 로깅, 미분류 에러만 actionWrapper에서 로깅
 - **보안**: cause(원본 에러 스택)는 클라이언트에 노출하지 않음, devMessage는 dev 모드에서만 전달
+
+---
+
+## useAction 사용 가이드라인
+
+### useAction이 적합한 경우
+
+| 계층 | `useAction` 사용 | 이유 |
+|------|:-:|------|
+| 페이지/feature에서 이벤트 핸들러 호출 | **O** | 로딩 + envelope 언래핑 + 에러 일괄 처리 |
+| `dataSource` props로 Server Action을 받는 공용 컨트롤 | **O** | 컴포넌트가 Action 내부 구현을 모른 채 실행만 위임 |
+
+### useAction이 불필요하거나 부적합한 경우
+
+| 계층 | `useAction` 사용 | 이유 |
+|------|:-:|------|
+| `<form action={...}>` / `useActionState` | **X** | React가 pending 상태를 관리, envelope만 직접 언래핑 |
+| Server Component | **X** | 클라이언트 훅 사용 불가 |
+| 순수 UI 공용 control 컴포넌트 (Button, Input 등) | **X** | Action을 모르는 순수 UI여야 함 |
+
+### 핵심 원칙
+
+- `actionAgent`(서버 래퍼)는 **모든** Server Action에 필수
+- `useAction`(클라이언트 훅)은 **이벤트 핸들러에서 직접 호출할 때** 사용
+- `dataSource` props로 Server Action을 받는 공용 컨트롤도 `useAction` 사용 가능
+
+### dataSource 패턴 — 공용 컴포넌트에서 Server Action을 실행하는 경우
+
+공용 컴포넌트가 **직접 비즈니스 로직을 아는 것**이 아니라, **외부에서 주입받은 함수를 실행**하는 것이므로 관심사 분리 원칙에 위배되지 않는다.
+
+```tsx
+interface AsyncSelectProps {
+  dataSource: (keyword: string) => Promise<ActionResponse<Option[]>>
+  onSelect?: (value: string) => void
+}
+
+function AsyncSelect({ dataSource, onSelect }: AsyncSelectProps) {
+  const { execute, isLoading } = useAction()
+  const [options, setOptions] = useState<Option[]>([])
+
+  const handleSearch = (keyword: string) =>
+    execute(() => dataSource(keyword), {
+      onSuccess: setOptions,
+    })
+}
+```
+
+**주의**: `dataSource` props의 타입을 반드시 `ActionResponse<T>`를 반환하는 함수로 강제해야 한다.
+
+```tsx
+// O — envelope 계약을 명시
+dataSource: (keyword: string) => Promise<ActionResponse<Option[]>>
+
+// X — useAction이 envelope을 언래핑할 수 없음
+dataSource: (keyword: string) => Promise<Option[]>
+```
