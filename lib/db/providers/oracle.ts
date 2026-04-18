@@ -132,7 +132,7 @@ async function runOnConnection<T>(
 ): Promise<oracledb.Result<T>> {
   // oracledb 의 timeout 은 connection.callTimeout (ms)
   if (opts.timeoutMs !== undefined) {
-    ;(conn as oracledb.Connection & { callTimeout?: number }).callTimeout = opts.timeoutMs
+    ; (conn as oracledb.Connection & { callTimeout?: number }).callTimeout = opts.timeoutMs
   }
   return conn.execute<T>(sql, binds as oracledb.BindParameters, toExecuteOptions(opts, autoCommit))
 }

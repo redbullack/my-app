@@ -11,7 +11,8 @@
  * envelope 변환은 래퍼가 담당한다.
  */
 
-import { getDb } from '@/lib/db'
+// import { getDb } from '@/lib/db'
+import { getDb } from '@/lib/db/factory-new'
 import { actionAgent } from '@/lib/utils/server/actionWrapper'
 
 const db = getDb('MAIN')
