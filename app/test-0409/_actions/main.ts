@@ -43,6 +43,60 @@ export interface EmpSearchCond {
  * Grid 조회
  * ────────────────────────────────────────────────*/
 
+export const fetchEmpListTest = async (cond: EmpSearchCond) => {
+  const binds: Record<string, unknown> = {}
+  const where: string[] = ['1 = 1']
+
+  if (cond.dname.length > 0) {
+    const keys = cond.dname.map((v, i) => {
+      const k = `dname${i}`
+      binds[k] = v
+      return `:${k}`
+    })
+    where.push(`DEPT.DNAME IN (${keys.join(', ')})`)
+  }
+  if (cond.job.length > 0) {
+    const keys = cond.job.map((v, i) => {
+      const k = `job${i}`
+      binds[k] = v
+      return `:${k}`
+    })
+    where.push(`EMP.JOB IN (${keys.join(', ')})`)
+  }
+  if (cond.ename.length > 0) {
+    const keys = cond.ename.map((v, i) => {
+      const k = `ename${i}`
+      binds[k] = v
+      return `:${k}`
+    })
+    where.push(`EMP.ENAME IN (${keys.join(', ')})`)
+  }
+
+  return db.query<EmpRow>(
+    `
+      SELECT TO_CHAR(EMP.EMPNO)    AS "EMPNO"
+           , EMP.ENAME             AS "ENAME"
+           , EMP.JOB               AS "JOB"
+           , TO_CHAR(EMP.MGR)      AS "MGR"
+           , TO_CHAR(EMP.HIREDATE, 'YYYY-MM-DD') AS "HIREDATE"
+           , TO_CHAR(EMP.SAL)      AS "SAL"
+           , TO_CHAR(SALGRADE.GRADE) AS "GRADE"
+           , TO_CHAR(EMP.COMM)     AS "COMM"
+           , TO_CHAR(EMP.DEPTNO)   AS "DEPTNO"
+           , DEPT.DNAME            AS "DNAME"
+           , DEPT.LOC              AS "LOC"
+        FROM SCOTT.EMP_XXX
+        LEFT JOIN SCOTT.DEPT
+          ON DEPT.DEPTNO = EMP.DEPTNO
+        LEFT JOIN SCOTT.SALGRADE
+          ON EMP.SAL >= SALGRADE.LOSAL AND EMP.SAL <= SALGRADE.HISAL
+       WHERE ${where.join(' AND ')}
+       ORDER BY EMP.EMPNO
+      `,
+    binds,
+  )
+}
+
 export const fetchEmpList = async (cond: EmpSearchCond) =>
   actionAgent('fetchEmpList', async (): Promise<EmpRow[]> => {
     const binds: Record<string, unknown> = {}

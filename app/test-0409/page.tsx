@@ -9,7 +9,7 @@
  */
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useTransition } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { Input, SearchPanel, Grid, Panel, Button, Tab, TabSub, Modal } from '@/components/control'
 import type { GridColumn, ModifiedRow } from '@/components/control/Grid'
@@ -23,6 +23,7 @@ import {
   type EmpSearchCond,
   type EmpRow,
   type EmpUpdateRow,
+  fetchEmpListTest,
 } from './_actions/main'
 import { useAction } from '@/lib/utils/client/useAction'
 import { toast } from '@/components/control/Toast'
@@ -75,6 +76,7 @@ interface CondValues {
 
 export default function Test0409Page() {
   const { execute } = useAction()
+  const [isPending, startTransition] = useTransition()
   const searchParams = useSearchParams()
   const router = useRouter()
   const tabIndex = Number(searchParams.get('tab') ?? '0')
@@ -132,13 +134,37 @@ export default function Test0409Page() {
 
     // Grid 가 ActionResponse envelope 를 직접 언래핑한다.
     // 실패 시 unwrapEnvelope → handleGlobalError 로 자동 라우팅.
-    setGridDataSource(() => () => fetchEmpList(cond))
-    // setGridDataSource(() => fetchEmpList.bind(null, cond))
+
+    // startTransition(async () => {
+    //   // const rst = await fetchEmpListTest(cond)
+    //   // setGridDataSource(rst)
+    //   await fetchEmpListTest(cond).then(rst => {
+    //     setGridDataSource(rst)
+    //   }).catch(err => {
+    //     alert(err)
+    //   })
+    // })
+
+    // setGridDataSource(() => () => fetchEmpList(cond))
+
+    setGridDataSource(() => fetchEmpList.bind(null, cond))
+
     // fetchEmpList(cond).then(res => {
     //   if (res.isSuccess) {
     //     return res.data
     //   }
     //   throw new Error(res.error.message)
+    // })
+
+    // execute(fetchEmpList.bind(null, cond), {
+    //   onSuccess: (data) => {
+    //     // throw Error(`이것은 수 동 ! 에 ! 러 !`)
+    //     setGridDataSource(data)
+    //   },
+    //   onError: (error) => {
+    //     alert(error)
+    //     // return 'handled'
+    //   }
     // })
 
     setCheckedRows([])
