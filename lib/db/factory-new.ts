@@ -25,7 +25,6 @@ import type {
   IDbClient,
   ProviderName,
   QueryOptions,
-  QueryResult
 } from './types'
 
 const clientCache = new Map<string, IDbClient>()
@@ -123,13 +122,12 @@ export function getDb(name: string = "MAIN"): IDbClient {
   const provider = getProvider(providerName)
 
   const client: IDbClient = {
-    query<T>(sql: string, binds: BindParams = {}, opts: QueryOptions = {}): Promise<QueryResult<T>> {
+    query<T>(sql: string, binds: BindParams = {}, opts: QueryOptions = {}): Promise<T[]> {
       return withLifecycle(
         { dbName: name, provider: providerName, sql, binds, opts, op: 'query' },
         (traceId) =>
           provider.query<T>(name, dsn, pool, sql, binds, { ...opts, traceId }),
-        // (rows) => (Array.isArray(rows) ? rows.length : 0),
-        (r) => r.rows.length,
+        (rows) => (Array.isArray(rows) ? rows.length : 0),
       )
     },
 

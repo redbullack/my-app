@@ -29,13 +29,8 @@ export interface QueryOptions {
   traceId?: string
 }
 
-export type QueryResult<T = Record<string, unknown>> = {
-  columns: { name: string; type: 'string' | 'number' | 'date' }[]
-  rows: T[]
-}
-
 /** INSERT/UPDATE/DELETE 결과. */
-export type ExecuteResult<T = Record<string, unknown>> = {
+export interface ExecuteResult<T = Record<string, unknown>> {
   rows: T[]
   rowsAffected: number
 }
@@ -50,7 +45,7 @@ export interface IDbClient {
     sql: string,
     binds?: BindParams,
     opts?: QueryOptions,
-  ): Promise<QueryResult<T>>
+  ): Promise<T[]>
 
   /** INSERT/UPDATE/DELETE — rowsAffected 포함. */
   execute<T = Record<string, unknown>>(
@@ -117,7 +112,7 @@ export interface IDbProvider {
     sql: string,
     binds: BindParams,
     opts: QueryOptions,
-  ): Promise<QueryResult<T>>
+  ): Promise<T[]>
 
   execute<T>(
     dbName: string,
