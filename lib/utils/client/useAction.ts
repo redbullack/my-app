@@ -25,10 +25,13 @@ interface ExecuteOptions<T> {
     onError?: (error: AppError) => 'handled' | void
     /** true 면 실패 시 전역 토스트를 띄우지 않는다. */
     silent?: boolean
+    /** true 면 실패 시 가장 가까운 error.tsx(Error Boundary)로 throw 한다. */
+    throwToBoundary?: boolean
 }
 
 export function useAction() {
     const [isLoading, setIsLoading] = useState(false)
+    const [, setBoundaryError] = useState<unknown>(null)
 
     const execute = useCallback(
         async <T>(
@@ -45,9 +48,17 @@ export function useAction() {
                 const appError = new AppError(result.error)
                 const handled = opts.onError?.(appError)
                 if (handled === 'handled' || opts.silent) return
+                if (opts.throwToBoundary) {
+                    setBoundaryError(() => { throw appError })
+                    return
+                }
                 handleGlobalError(appError)
             } catch (err: unknown) {
                 if (opts.silent) return
+                if (opts.throwToBoundary) {
+                    setBoundaryError(() => { throw err })
+                    return
+                }
                 handleGlobalError(
                     err instanceof Error ? err : new Error('알 수 없는 오류'),
                 )

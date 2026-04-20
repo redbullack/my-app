@@ -15,6 +15,7 @@ import type {
   IDbProvider,
   PoolOptions,
   QueryOptions,
+  QueryResult,
   ResolvedDsn,
 } from '../types'
 import { DbError, categorizeOracleError } from '../errors'
@@ -55,6 +56,22 @@ export function parseOracleDsn(plain: string): ResolvedDsn {
     password: cred.slice(slash + 1),
     connectString: host,
   }
+}
+
+function mapDbType(dbTypeName: string | undefined): 'string' | 'number' | 'date' {
+  const n = dbTypeName ?? ''
+  if (n.startsWith('TIMESTAMP') || n === 'DATE') return 'date'
+  if (n === 'NUMBER' || n === 'BINARY_FLOAT' || n === 'BINARY_DOUBLE') return 'number'
+  return 'string' // VARCHAR2, CHAR, NCHAR, NVARCHAR2, CLOB
+}
+
+function toColumns<T>(
+  meta: oracledb.Metadata<T>[] | undefined,
+): { name: string; type: 'string' | 'number' | 'date' }[] {
+  return (meta ?? []).map((c) => ({
+    name: c.name,
+    type: mapDbType(c.dbTypeName),
+  }))
 }
 
 async function getPool(
@@ -144,12 +161,15 @@ async function oracleQuery<T>(
   sql: string,
   binds: BindParams,
   opts: QueryOptions,
-): Promise<T[]> {
+): Promise<QueryResult<T>> {
   const p = await getPool(dbName, dsn, pool)
   const conn = await p.getConnection()
   try {
     const result = await runOnConnection<T>(conn, sql, binds, opts, true)
-    return (result.rows ?? []) as T[]
+    return {
+      columns: toColumns(result.metaData),
+      rows: (result.rows ?? []) as T[],
+    }
   } catch (err) {
     throw toDbError(err, dbName, opts.traceId)
   } finally {
@@ -199,10 +219,13 @@ async function oracleWithTransaction<R>(
 
   // 트랜잭션 내부 클라이언트 — 동일 conn 위에서 동작, autoCommit=false
   const tx: IDbClient = {
-    async query<T>(sql: string, binds: BindParams = {}, opts: QueryOptions = {}): Promise<T[]> {
+    async query<T>(sql: string, binds: BindParams = {}, opts: QueryOptions = {}): Promise<QueryResult<T>> {
       try {
         const result = await runOnConnection<T>(conn, sql, binds, opts, false)
-        return (result.rows ?? []) as T[]
+        return {
+          columns: toColumns(result.metaData),
+          rows: (result.rows ?? []) as T[],
+        }
       } catch (err) {
         throw toDbError(err, dbName, opts.traceId)
       }

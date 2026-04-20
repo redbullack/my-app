@@ -41,7 +41,7 @@ export default function GlobalError({
           <div className="mt-2 flex items-center justify-center gap-2">
             <Badge variant="error">{(error as AppError).type}</Badge>
             <span className="text-xs text-text-muted font-mono">
-              {(error as AppError).traceId.slice(0, 8)}
+              {(error as AppError).traceId}
             </span>
           </div>
         )}
