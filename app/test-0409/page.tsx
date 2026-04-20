@@ -149,11 +149,12 @@ export default function Test0409Page() {
 
     setGridDataSource(() => fetchEmpList.bind(null, cond))
 
-    // fetchEmpList(cond).then(res => {
-    //   if (res.isSuccess) {
-    //     return res.data
+    // fetchEmpListTest(cond).then(res => {
+    //   if (res) {
+    //     setGridDataSource(res.rows)
+    //   } else {
+    //     throw new Error('에러 발생 ! ! ! ')
     //   }
-    //   throw new Error(res.error.message)
     // })
 
     // execute(fetchEmpList.bind(null, cond), {
@@ -161,10 +162,12 @@ export default function Test0409Page() {
     //     // throw Error(`이것은 수 동 ! 에 ! 러 !`)
     //     setGridDataSource(data)
     //   },
-    //   onError: (error) => {
-    //     alert(error)
-    //     // return 'handled'
-    //   }
+    //   // onError: (error) => {
+    //   //   alert(error)
+    //   //   // return 'handled'
+    //   // },
+    //   throwToBoundary: true,
+    //   // silent: true,
     // })
 
     setCheckedRows([])

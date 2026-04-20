@@ -33,7 +33,8 @@ const SELECT_EMP = `
 
 export const fetchEmpSimple = async () =>
   actionAgent('fetchEmpSimple', async (): Promise<EmpSimpleRow[]> => {
-    return db.query<EmpSimpleRow>(SELECT_EMP)
+    const result = await db.query<EmpSimpleRow>(SELECT_EMP)
+    return result.rows
   })
 
 /* ────────────────────────────────────────────────
@@ -62,11 +63,11 @@ async function readSal(
   client: { query: typeof db.query },
   empno: string,
 ): Promise<string | null> {
-  const rows = await client.query<{ SAL: string | null }>(
+  const result = await client.query<{ SAL: string | null }>(
     `SELECT TO_CHAR(SAL) AS "SAL" FROM SCOTT.EMP WHERE EMPNO = :empno`,
     { empno: Number(empno) },
   )
-  return rows[0]?.SAL ?? null
+  return result.rows[0]?.SAL ?? null
 }
 
 export const runTxCommit = async (input: TxTestInput) =>

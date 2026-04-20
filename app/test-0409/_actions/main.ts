@@ -43,6 +43,11 @@ export interface EmpSearchCond {
  * Grid 조회
  * ────────────────────────────────────────────────*/
 
+export const fetchTestMethod = async (cond: string) => {
+  // const result = db.query(`SELECT 1 COL, 2 COL2 FROM DUAL`)
+  return db.query(`SELECT 1 COL, 2 COL2 FROM DUAL`)
+}
+
 export const fetchEmpListTest = async (cond: EmpSearchCond) => {
   const binds: Record<string, unknown> = {}
   const where: string[] = ['1 = 1']
@@ -85,7 +90,7 @@ export const fetchEmpListTest = async (cond: EmpSearchCond) => {
            , TO_CHAR(EMP.DEPTNO)   AS "DEPTNO"
            , DEPT.DNAME            AS "DNAME"
            , DEPT.LOC              AS "LOC"
-        FROM SCOTT.EMP_XXX
+        FROM SCOTT.EMP
         LEFT JOIN SCOTT.DEPT
           ON DEPT.DEPTNO = EMP.DEPTNO
         LEFT JOIN SCOTT.SALGRADE
@@ -127,7 +132,7 @@ export const fetchEmpList = async (cond: EmpSearchCond) =>
       where.push(`EMP.ENAME IN (${keys.join(', ')})`)
     }
 
-    return db.query<EmpRow>(
+    const result = await db.query<EmpRow>(
       `
       SELECT TO_CHAR(EMP.EMPNO)    AS "EMPNO"
            , EMP.ENAME             AS "ENAME"
@@ -140,7 +145,7 @@ export const fetchEmpList = async (cond: EmpSearchCond) =>
            , TO_CHAR(EMP.DEPTNO)   AS "DEPTNO"
            , DEPT.DNAME            AS "DNAME"
            , DEPT.LOC              AS "LOC"
-        FROM SCOTT.EMP
+        FROM SCOTT.EMP_XXX
         LEFT JOIN SCOTT.DEPT
           ON DEPT.DEPTNO = EMP.DEPTNO
         LEFT JOIN SCOTT.SALGRADE
@@ -150,6 +155,8 @@ export const fetchEmpList = async (cond: EmpSearchCond) =>
       `,
       binds,
     )
+
+    return result.rows
   })
 
 /* ────────────────────────────────────────────────
@@ -194,14 +201,14 @@ function buildInClause(
 /** DNAME 옵션 — cascade 의존성 없음 */
 export const fetchDnameOptions = async () =>
   actionAgent('fetchDnameOptions', async (): Promise<string[]> => {
-    const rows = await db.query<{ VALUE: string }>(
+    const result = await db.query<{ VALUE: string }>(
       `
       SELECT DISTINCT DNAME AS "VALUE"
         FROM (${EMP_INLINE_VIEW})
        ORDER BY DNAME
       `,
     )
-    return rows.map(r => r.VALUE)
+    return result.rows.map(r => r.VALUE)
   })
 
 /** JOB 옵션 — DNAME에 cascade */
@@ -209,7 +216,7 @@ export const fetchJobOptions = async (selectedDname: string[]) =>
   actionAgent('fetchJobOptions', async (): Promise<string[]> => {
     const binds: Record<string, unknown> = {}
     const where = buildInClause('DNAME', selectedDname, 'dname', binds)
-    const rows = await db.query<{ VALUE: string }>(
+    const result = await db.query<{ VALUE: string }>(
       `
       SELECT DISTINCT JOB AS "VALUE"
         FROM (${EMP_INLINE_VIEW})
@@ -218,7 +225,7 @@ export const fetchJobOptions = async (selectedDname: string[]) =>
       `,
       binds,
     )
-    return rows.map(r => r.VALUE)
+    return result.rows.map(r => r.VALUE)
   })
 
 /** ENAME 옵션 — DNAME + JOB에 cascade */
@@ -233,7 +240,7 @@ export const fetchEnameOptions = async (
       buildInClause('JOB', selectedJob, 'job', binds),
     ].filter((c): c is string => c !== null)
 
-    const rows = await db.query<{ VALUE: string }>(
+    const result = await db.query<{ VALUE: string }>(
       `
       SELECT DISTINCT ENAME AS "VALUE"
         FROM (${EMP_INLINE_VIEW})
@@ -242,7 +249,7 @@ export const fetchEnameOptions = async (
       `,
       binds,
     )
-    return rows.map(r => r.VALUE)
+    return result.rows.map(r => r.VALUE)
   })
 
 /* ────────────────────────────────────────────────
