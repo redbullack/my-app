@@ -11,10 +11,12 @@
  * import { getDb } from '@/lib/db'
  * const db = getDb('MAIN')
  * const rows = await db.query<Emp>('SELECT * FROM emp WHERE deptno = :d', { d: 10 })
+ * const { columns, rows } = await db.query<Emp>(...)
  * ```
  */
 
-export { getDb } from './factory'
+// export { getDb } from './factory'
+export { getDb } from './factory-new'
 export { DbError, SAFE_PUBLIC_MESSAGE, type DbErrorCategory } from './errors'
 export type { DbName } from './config/databases'
 export type {
@@ -24,6 +26,7 @@ export type {
   ExecuteResult,
   PoolOptions,
   ProviderName,
+  QueryResult
 } from './types'
 
 import { getDb } from './factory'
