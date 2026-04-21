@@ -50,6 +50,8 @@ async function withLifecycle<R>(
   const log = getDbLogger()
   const start = Date.now()
 
+  const parentTraceId = args.opts.parentTraceId
+
   try {
     const result = await run(traceId)
     const durationMs = Date.now() - start
@@ -58,6 +60,7 @@ async function withLifecycle<R>(
       provider: args.provider,
       op: args.op,
       traceId,
+      parentTraceId,
       durationMs,
       sql: args.sql,
       binds: args.binds,
@@ -66,20 +69,28 @@ async function withLifecycle<R>(
     return result
   } catch (err) {
     const durationMs = Date.now() - start
+    const alreadyLogged =
+      err instanceof DbError &&
+      (err as DbError & { __loggedByLifecycle?: boolean }).__loggedByLifecycle === true
+
     if (err instanceof DbError) {
-      log.error('db.err', {
-        db: args.dbName,
-        provider: args.provider,
-        op: args.op,
-        traceId,
-        durationMs,
-        sql: args.sql,
-        binds: args.binds,
-        category: err.category,
-        code: err.code,
-        devMessage: err.devMessage,
-        cause: err.cause instanceof Error ? err.cause.message : String(err.cause ?? ''),
-      })
+      if (!alreadyLogged) {
+        log.error('db.err', {
+          db: args.dbName,
+          provider: args.provider,
+          op: args.op,
+          traceId,
+          parentTraceId,
+          durationMs,
+          sql: args.sql,
+          binds: args.binds,
+          category: err.category,
+          code: err.code,
+          devMessage: err.devMessage,
+          cause: err.cause instanceof Error ? err.cause.message : String(err.cause ?? ''),
+        })
+          ; (err as DbError & { __loggedByLifecycle?: boolean }).__loggedByLifecycle = true
+      }
       throw err
     }
     const wrapped = new DbError({
@@ -93,12 +104,14 @@ async function withLifecycle<R>(
       provider: args.provider,
       op: args.op,
       traceId,
+      parentTraceId,
       durationMs,
       sql: args.sql,
       binds: args.binds,
       category: 'unknown',
       cause: err instanceof Error ? err.message : String(err),
     })
+      ; (wrapped as DbError & { __loggedByLifecycle?: boolean }).__loggedByLifecycle = true
     throw wrapped
   }
 }
@@ -147,16 +160,52 @@ export function getDb(name: string = "MAIN"): IDbClient {
     },
 
     transaction<R>(fn: (tx: IDbClient) => Promise<R>): Promise<R> {
+      const txTraceId = randomUUID()
       return withLifecycle(
         {
           dbName: name,
           provider: providerName,
           sql: 'TRANSACTION',
           binds: {},
-          opts: {},
+          opts: { traceId: txTraceId },
           op: 'transaction',
         },
-        () => provider.withTransaction(name, dsn, pool, fn),
+        () =>
+          provider.withTransaction(name, dsn, pool, async (rawTx) => {
+            const wrappedTx: IDbClient = {
+              query<T>(sql: string, binds: BindParams = {}, opts: QueryOptions = {}) {
+                return withLifecycle(
+                  {
+                    dbName: name,
+                    provider: providerName,
+                    sql,
+                    binds,
+                    opts: { ...opts, parentTraceId: txTraceId },
+                    op: 'query',
+                  },
+                  (traceId) => rawTx.query<T>(sql, binds, { ...opts, traceId }),
+                  (r) => r.rows.length,
+                )
+              },
+              execute<T>(sql: string, binds: BindParams = {}, opts: QueryOptions = {}) {
+                return withLifecycle(
+                  {
+                    dbName: name,
+                    provider: providerName,
+                    sql,
+                    binds,
+                    opts: { ...opts, parentTraceId: txTraceId },
+                    op: 'execute',
+                  },
+                  (traceId) => rawTx.execute<T>(sql, binds, { ...opts, traceId }),
+                  (r) => r.rowsAffected,
+                )
+              },
+              transaction: rawTx.transaction.bind(rawTx),
+            }
+            return fn(wrappedTx)
+          }),
+
       )
     },
   }

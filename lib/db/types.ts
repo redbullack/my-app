@@ -27,6 +27,11 @@ export interface QueryOptions {
    * 미지정 시 factory 에서 자동 생성하여 모든 로그 라인에 기록.
    */
   traceId?: string
+  /**
+   * 트랜잭션 내부 호출의 경우, 바깥 transaction lifecycle 의 traceId.
+   * 내부 개별 query/execute 로그를 하나의 트랜잭션으로 묶기 위함.
+   */
+  parentTraceId?: string
 }
 
 export type QueryResult<T = Record<string, unknown>> = {
