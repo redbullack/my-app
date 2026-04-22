@@ -11,9 +11,8 @@
  * envelope 변환은 래퍼가 담당한다.
  */
 
-// import { getDb } from '@/lib/db'
-import { getDb } from '@/lib/db/factory-new'
-import { actionAgent } from '@/lib/utils/server/actionWrapper'
+import { getDb } from '@/lib/db'
+import { actionAgent } from '@/lib/utils/server'
 
 const db = getDb('MAIN')
 
@@ -145,7 +144,7 @@ export const fetchEmpList = async (cond: EmpSearchCond) =>
            , TO_CHAR(EMP.DEPTNO)   AS "DEPTNO"
            , DEPT.DNAME            AS "DNAME"
            , DEPT.LOC              AS "LOC"
-        FROM SCOTT.EMP_XXX
+        FROM SCOTT.EMP
         LEFT JOIN SCOTT.DEPT
           ON DEPT.DEPTNO = EMP.DEPTNO
         LEFT JOIN SCOTT.SALGRADE

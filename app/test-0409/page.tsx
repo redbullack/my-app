@@ -25,9 +25,9 @@ import {
   type EmpUpdateRow,
   fetchEmpListTest,
 } from './_actions/main'
-import { useAction } from '@/lib/utils/client/useAction'
+import type { ActionResponse } from '@/lib/utils'
+import { useAction } from '@/lib/utils/client'
 import { toast } from '@/components/control/Toast'
-import type { ActionResponse } from '@/lib/utils/type'
 
 /* ── EMP 테이블 컬럼만 추출 ── */
 

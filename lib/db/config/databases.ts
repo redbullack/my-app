@@ -20,7 +20,22 @@
  *  - 복호화 키는 `DB_CONFIG_SECRET` (32 bytes hex) 환경변수.
  */
 
-import type { DbConfigEntry } from '../types'
+import { PoolOptions, ProviderName } from "../types"
+
+export interface DbConfigEntry {
+  /** 사용할 프로바이더. */
+  providerName: ProviderName
+  /** connectString 필드가 암호화되어 있는지 여부. */
+  encrypt: boolean
+  /**
+   * DB 접속 문자열.
+   * - 평문: `user/password@host:port/service`
+   * - 암호문: `enc:v1:<iv>:<tag>:<cipher>` (scripts/db-encrypt.mjs 로 생성)
+   */
+  connectString: string
+  /** 풀 옵션. 미지정 시 provider 기본값 적용. */
+  pool?: PoolOptions
+}
 
 export const databases = {
   /** 메인 운영 Oracle DB. */

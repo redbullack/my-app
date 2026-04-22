@@ -83,26 +83,7 @@ export interface PoolOptions {
   timeoutSec?: number
 }
 
-/**
- * `lib/db/config/databases.ts` 의 한 항목 형태.
- * C# 레거시의 DB.config 한 row 에 대응.
- */
-export interface DbConfigEntry {
-  /** 사용할 프로바이더. */
-  providerName: ProviderName
-  /** connectString 필드가 암호화되어 있는지 여부. */
-  encrypt: boolean
-  /**
-   * DB 접속 문자열.
-   * - 평문: `user/password@host:port/service`
-   * - 암호문: `enc:v1:<iv>:<tag>:<cipher>` (scripts/db-encrypt.mjs 로 생성)
-   */
-  connectString: string
-  /** 풀 옵션. 미지정 시 provider 기본값 적용. */
-  pool?: PoolOptions
-}
-
-/** 평문 connectString 을 파싱한 결과 — provider 가 사용. */
+/** 평문 connectString 을 파싱한 결과 — provider 가 사용(내부 전용). */
 export interface ResolvedDsn {
   user: string
   password: string

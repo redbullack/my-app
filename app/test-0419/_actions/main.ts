@@ -8,8 +8,8 @@
  * - runTxRollback: db.transaction() 내에서 UPDATE 후 고의 throw → rollback 검증
  */
 
-import { getDb } from '@/lib/db/factory-new'
-import { actionAgent } from '@/lib/utils/server/actionWrapper'
+import { getDb } from '@/lib/db'
+import { actionAgent } from '@/lib/utils/server'
 
 const db = getDb('MAIN')
 

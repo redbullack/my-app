@@ -13,7 +13,8 @@ import { useCallback, useState } from 'react'
 import { Button, Grid, Panel, Input } from '@/components/control'
 import type { GridColumn } from '@/components/control/Grid'
 import RouteInfo from '@/components/shared/RouteInfo'
-import { useAction } from '@/lib/utils/client/useAction'
+import type { ActionResponse } from '@/lib/utils'
+import { useAction } from '@/lib/utils/client'
 import { toast } from '@/components/control/Toast'
 import {
   fetchEmpSimple,
@@ -22,7 +23,6 @@ import {
   type EmpSimpleRow,
   type TxTestResult,
 } from './_actions/main'
-import { ActionResponse } from '@/lib/utils/type'
 
 const columns: GridColumn[] = [
   { name: 'EMPNO', header: '사번', width: 80, align: 'center' },

@@ -33,7 +33,7 @@ export async function registerNode(): Promise<void> {
   const criticalDbs = ['MAIN'] as const
 
   try {
-    const { warmupDb } = await import('@/lib/db/factory-new')
+    const { warmupDb } = await import('@/lib/db')
 
     await Promise.all(
       criticalDbs.map(async (name) => {
