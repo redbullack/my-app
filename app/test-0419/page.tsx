@@ -18,7 +18,7 @@ import { toast } from '@/components/control/Toast'
 import {
   fetchEmpSimple,
   runTxCommit,
-  runTxRollback,
+  // runTxRollback,
   type EmpSimpleRow,
   type TxTestResult,
 } from './_actions/main'
@@ -63,20 +63,20 @@ export default function Test0419Page() {
     )
   }, [execute, empnoA, empnoB, delta, reload])
 
-  const handleRollback = useCallback(() => {
-    execute(
-      runTxRollback.bind(null, { empnoA, empnoB, delta: Number(delta) || 0 }),
-      {
-        onSuccess: data => {
-          setTxResult(data)
-          toast('Rollback 확인 — 값이 원복되었는지 검증하세요', {
-            variant: 'info',
-          })
-          reload()
-        },
-      },
-    )
-  }, [execute, empnoA, empnoB, delta, reload])
+  // const handleRollback = useCallback(() => {
+  //   execute(
+  //     runTxRollback.bind(null, { empnoA, empnoB, delta: Number(delta) || 0 }),
+  //     {
+  //       onSuccess: data => {
+  //         setTxResult(data)
+  //         toast('Rollback 확인 — 값이 원복되었는지 검증하세요', {
+  //           variant: 'info',
+  //         })
+  //         reload()
+  //       },
+  //     },
+  //   )
+  // }, [execute, empnoA, empnoB, delta, reload])
 
   return (
     <main className="min-h-screen bg-bg-primary px-4 py-6">
@@ -145,9 +145,9 @@ export default function Test0419Page() {
             <Button variant="primary" size="sm" onClick={handleCommit}>
               Commit 테스트
             </Button>
-            <Button variant="danger" size="sm" onClick={handleRollback}>
+            {/* <Button variant="danger" size="sm" onClick={handleRollback}>
               Rollback 테스트
-            </Button>
+            </Button> */}
           </div>
 
           <Grid

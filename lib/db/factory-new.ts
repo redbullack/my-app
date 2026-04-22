@@ -214,6 +214,24 @@ export function getDb(name: string = "MAIN"): IDbClient {
   return client
 }
 
+/**
+ * DB 풀을 선제적으로 생성한다(워밍업).
+ * instrumentation.ts 의 server 부팅 훅에서 호출되어 첫 요청의 풀 생성 비용을 제거한다.
+ * 이미 생성된 풀이 있으면 provider 내부 캐시가 no-op 처리한다.
+ */
+export async function warmupDb(name: string): Promise<void> {
+  const envResult = resolveFromEnv(name)
+  if (!envResult) {
+    throw new DbError({
+      category: 'config',
+      devMessage: `환경변수 DB_CONNECTION__${name} 이 설정되지 않았습니다`,
+    })
+  }
+  const { providerName, dsn, pool } = envResult
+  const provider = getProvider(providerName)
+  await provider.warmup(name, dsn, pool)
+}
+
 // ─── 프로세스 종료 훅 ──────────────────────────────────────────────
 const HOOK_FLAG = '__myapp_db_new_exit_hook__'
 {

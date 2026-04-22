@@ -97,35 +97,35 @@ export const runTxCommit = async (input: TxTestInput) =>
     return { committed: true, beforeA, beforeB, afterA, afterB }
   })
 
-export const runTxRollback = async (input: TxTestInput) =>
-  actionAgent('runTxRollback', async (): Promise<TxTestResult> => {
-    let beforeA: string | null = null
-    let beforeB: string | null = null
-    let afterA: string | null = null
-    let afterB: string | null = null
+// export const runTxRollback = async (input: TxTestInput) =>
+//   actionAgent('runTxRollback', async (): Promise<TxTestResult> => {
+//     let beforeA: string | null = null
+//     let beforeB: string | null = null
+//     let afterA: string | null = null
+//     let afterB: string | null = null
 
-    try {
-      await db.transaction(async tx => {
-        beforeA = await readSal(tx, input.empnoA)
-        beforeB = await readSal(tx, input.empnoB)
+//     try {
+//       await db.transaction(async tx => {
+//         beforeA = await readSal(tx, input.empnoA)
+//         beforeB = await readSal(tx, input.empnoB)
 
-        await tx.execute(
-          `UPDATE SCOTT.EMP SET SAL = SAL + :d WHERE EMPNO = :empno`,
-          { d: input.delta, empno: Number(input.empnoA) },
-        )
-        await tx.execute(
-          `UPDATE SCOTT.EMP SET SAL = SAL + :d WHERE EMPNO = :empno`,
-          { d: input.delta, empno: Number(input.empnoB) },
-        )
+//         await tx.execute(
+//           `UPDATE SCOTT.EMP SET SAL = SAL + :d WHERE EMPNO = :empno`,
+//           { d: input.delta, empno: Number(input.empnoA) },
+//         )
+//         await tx.execute(
+//           `UPDATE SCOTT.EMP SET SAL = SAL + :d WHERE EMPNO = :empno`,
+//           { d: input.delta, empno: Number(input.empnoB) },
+//         )
 
-        afterA = await readSal(tx, input.empnoA)
-        afterB = await readSal(tx, input.empnoB)
+//         afterA = await readSal(tx, input.empnoA)
+//         afterB = await readSal(tx, input.empnoB)
 
-        throw new Error('__forced_rollback__')
-      })
-    } catch (err) {
-      if ((err as Error)?.message !== '__forced_rollback__') throw err
-    }
+//         throw new Error('__forced_rollback__')
+//       })
+//     } catch (err) {
+//       if ((err as Error)?.message !== '__forced_rollback__') throw err
+//     }
 
-    return { committed: false, beforeA, beforeB, afterA, afterB }
-  })
+//     return { committed: false, beforeA, beforeB, afterA, afterB }
+//   })

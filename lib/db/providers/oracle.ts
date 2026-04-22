@@ -20,6 +20,30 @@ import type {
 } from '../types'
 import { DbError, categorizeOracleError } from '../errors'
 import { getDbLogger } from '../logger'
+import path from 'node:path'
+
+/* Thick 모드 초기화 */
+const THICK_INIT_KEY = '__myapp_oracle_thick_initialized__'
+function ensureThickMode(): void {
+  const g = globalThis as unknown as Record<string, boolean | undefined>
+  if (g[THICK_INIT_KEY]) return
+
+  const libDir = path.resolve(process.cwd(), 'vendor/instantclient/instantclient_21_20')
+  try {
+    oracledb.initOracleClient({ libDir })
+    g[THICK_INIT_KEY] = true
+    getDbLogger().info('oracle.thick.initialized', {
+      libDir,
+      clientVersion: oracledb.oracleClientVersionString,
+    })
+  } catch (err) {
+    throw new DbError({
+      category: 'config',
+      cause: err,
+      devMessage: `Oracle Thick 모드 초기화 실패 — libDir=${libDir}. Instant Client 설치 또는 ORACLE_CLIENT_LIB_DIR 를 확인하세요.`,
+    })
+  }
+}
 
 /** HMR-safe 풀 저장소. globalThis 에 두어 dev 리로드 간에도 동일 풀 재사용. */
 type PoolStore = Map<string, Promise<oracledb.Pool>>
@@ -82,6 +106,8 @@ async function getPool(
   const store = getPoolStore()
   let p = store.get(dbName)
   if (p) return p
+
+  ensureThickMode()
 
   const log = getDbLogger()
   p = oracledb
@@ -275,6 +301,14 @@ async function oracleWithTransaction<R>(
   }
 }
 
+async function oracleWarmup(
+  dbName: string,
+  dsn: ResolvedDsn,
+  pool: PoolOptions | undefined,
+): Promise<void> {
+  await getPool(dbName, dsn, pool)
+}
+
 async function oracleClosePool(dbName: string): Promise<void> {
   const store = getPoolStore()
   const p = store.get(dbName)
@@ -308,6 +342,7 @@ export const oracleProvider: IDbProvider = {
   query: oracleQuery,
   execute: oracleExecute,
   withTransaction: oracleWithTransaction,
+  warmup: oracleWarmup,
   closePool: oracleClosePool,
   closeAll: oracleCloseAll,
 }

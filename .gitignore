@@ -80,3 +80,6 @@ $RECYCLE.BIN/
 
 # Turbo
 .turbo/
+
+# Oracle Instant Client
+vendor/instantclient/
