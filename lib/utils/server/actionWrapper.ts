@@ -12,7 +12,7 @@
  *  - 그 외 Error 는 여기서 server.action 이벤트로 1회 로깅.
  */
 import { randomUUID } from 'node:crypto'
-import { DbError, type DbErrorCategory } from '@/lib/db/errors'
+import { DbError, type DbErrorCategory } from '@/lib/db'
 import type { ActionResponse, ActionError, ErrorType } from '../type'
 
 /** DbError.category → ActionError.type */

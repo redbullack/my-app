@@ -10,9 +10,8 @@
 
 import { useState, useRef, useEffect, useCallback, useTransition } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { cn } from '@/lib/utils'
+import { cn, type ActionResponse } from '@/lib/utils'
 import type { SelectOption } from '@/types'
-import type { ActionResponse } from '@/lib/utils/type'
 import { handleGlobalError } from '@/lib/utils/client/globalErrorHandler'
 
 type InputType = 'text' | 'password' | 'email' | 'number' | 'search' | 'select'

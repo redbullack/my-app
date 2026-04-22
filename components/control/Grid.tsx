@@ -17,10 +17,9 @@
 
 import { Suspense, use, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import type { GridEventName, OptColumn, OptRow, OptRowHeader } from 'tui-grid/types/options'
-import { cn } from '@/lib/utils'
+import { cn, AppError, type ActionResponse } from '@/lib/utils'
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary'
 import { handleGlobalError } from '@/lib/utils/client/globalErrorHandler'
-import { AppError, type ActionResponse } from '@/lib/utils/type'
 
 /* ── 타입 ── */
 

@@ -1,62 +1,36 @@
 /**
  * @module lib/db/factory
  * @description
- * `getDb(name)` — DB 레이어의 메인 진입점.
+ * `getDb(name)` — 환경변수 전용 DB 팩토리. DB 레이어의 메인 진입점.
  *
- * 책임:
- *  1) 레지스트리에서 DB 항목 조회 + connectString 복호화
- *  2) provider 어댑터 선택
- *  3) 모든 query/execute 를 `withLifecycle` 로 감싸 traceId/시간/성공·실패 로그/에러 변환을 한 곳에서 처리
- *  4) 클라이언트 인스턴스 캐싱 (DB 이름별 1회 생성)
- *  5) 프로세스 종료 훅 등록 (graceful pool drain)
+ * 접속 정보는 오직 `.env.local` 의 `DB_CONNECTION__<NAME>` 환경변수에서만 해석된다.
+ * 모든 query/execute/transaction 은 `withLifecycle` 로 감싸 traceId/시간 측정/
+ * 성공·실패 로그/DbError 변환을 한 곳에서 처리한다. 클라이언트는 DB 이름별로 1회 캐싱된다.
  *
- * 호출자(서버 액션·라우트 핸들러)는 오직 이 모듈의 `getDb` 만 사용한다.
+ * 호출자(서버 액션·라우트 핸들러)는 `@/lib/db` barrel 의 `getDb` 만 사용한다.
+ *
+ * 호출 예시:
+ * ```ts
+ * import { getDb } from '@/lib/db'
+ * const rows = await getDb('MAIN').query<MyRow>('SELECT ...')
+ * ```
  */
 
 import { randomUUID } from 'node:crypto'
-import { databases, type DbName } from './config/databases'
 import { DbError } from './errors'
-import { bindShape, getDbLogger, sqlPreview } from './logger'
+import { getDbLogger } from './logger'
 import { closeAllProviders, getProvider } from './providers'
-import { parseOracleDsn } from './providers/oracle'
-import { decryptConnectString, isEncryptedToken } from './secret'
+import { resolveFromEnv } from './resolvers/env'
 import type {
   BindParams,
-  DbConfigEntry,
   ExecuteResult,
   IDbClient,
   ProviderName,
   QueryOptions,
-  ResolvedDsn,
   QueryResult
 } from './types'
 
-const clientCache = new Map<DbName, IDbClient>()
-
-/** DSN 파싱은 provider 별로 다를 수 있으나 현재는 oracle 한 종류. */
-function resolveDsn(provider: ProviderName, plain: string): ResolvedDsn {
-  switch (provider) {
-    case 'oracle':
-      return parseOracleDsn(plain)
-    default:
-      throw new DbError({
-        category: 'config',
-        devMessage: `DSN parser not implemented for provider: ${provider}`,
-      })
-  }
-}
-
-function resolveEntry(entry: DbConfigEntry): ResolvedDsn {
-  const plain = entry.encrypt ? decryptConnectString(entry.connectString) : entry.connectString
-  // 평문 항목인데 실수로 enc:v1 으로 시작하면 명확히 알려준다
-  if (!entry.encrypt && isEncryptedToken(entry.connectString)) {
-    throw new DbError({
-      category: 'config',
-      devMessage: 'connectString 이 enc: 토큰으로 보이지만 encrypt:false 입니다. encrypt:true 로 바꾸세요.',
-    })
-  }
-  return resolveDsn(entry.providerName, plain)
-}
+const clientCache = new Map<string, IDbClient>()
 
 /**
  * 모든 query/execute 의 공통 lifecycle.
@@ -78,17 +52,18 @@ async function withLifecycle<R>(
   const log = getDbLogger()
   const start = Date.now()
 
+  const parentTraceId = args.opts.parentTraceId
+
   try {
     const result = await run(traceId)
-    const durationMsOk = Date.now() - start
+    const durationMs = Date.now() - start
     log.info('db.ok', {
       db: args.dbName,
       provider: args.provider,
       op: args.op,
       traceId,
-      durationMs: durationMsOk,
-      // sql: sqlPreview(args.sql),
-      // binds: bindShape(args.binds),
+      parentTraceId,
+      durationMs,
       sql: args.sql,
       binds: args.binds,
       rowCount: countRows ? countRows(result) : undefined,
@@ -96,25 +71,30 @@ async function withLifecycle<R>(
     return result
   } catch (err) {
     const durationMs = Date.now() - start
+    const alreadyLogged =
+      err instanceof DbError &&
+      (err as DbError & { __loggedByLifecycle?: boolean }).__loggedByLifecycle === true
+
     if (err instanceof DbError) {
-      log.error('db.err', {
-        db: args.dbName,
-        provider: args.provider,
-        op: args.op,
-        traceId,
-        durationMs,
-        // sql: sqlPreview(args.sql),
-        // binds: bindShape(args.binds),
-        sql: args.sql,
-        binds: args.binds,
-        category: err.category,
-        code: err.code,
-        devMessage: err.devMessage,
-        cause: err.cause instanceof Error ? err.cause.message : String(err.cause ?? ''),
-      })
+      if (!alreadyLogged) {
+        log.error('db.err', {
+          db: args.dbName,
+          provider: args.provider,
+          op: args.op,
+          traceId,
+          parentTraceId,
+          durationMs,
+          sql: args.sql,
+          binds: args.binds,
+          category: err.category,
+          code: err.code,
+          devMessage: err.devMessage,
+          cause: err.cause instanceof Error ? err.cause.message : String(err.cause ?? ''),
+        })
+          ; (err as DbError & { __loggedByLifecycle?: boolean }).__loggedByLifecycle = true
+      }
       throw err
     }
-    // provider 가 변환하지 않은 raw 에러 — 안전망
     const wrapped = new DbError({
       category: 'unknown',
       traceId,
@@ -126,52 +106,45 @@ async function withLifecycle<R>(
       provider: args.provider,
       op: args.op,
       traceId,
+      parentTraceId,
       durationMs,
-      // sql: sqlPreview(args.sql),
-      // binds: bindShape(args.binds),
       sql: args.sql,
       binds: args.binds,
       category: 'unknown',
       cause: err instanceof Error ? err.message : String(err),
     })
+      ; (wrapped as DbError & { __loggedByLifecycle?: boolean }).__loggedByLifecycle = true
     throw wrapped
   }
 }
 
 /**
- * DB 레이어의 메인 팩토리.
- * @param name 레지스트리에 등록된 DB 이름. 오타 시 컴파일 에러.
+ * 환경변수 전용 DB 팩토리.
+ * @param name 환경변수 `DB_CONNECTION__<name>` 에 대응하는 DB 식별자.
  */
-export function getDb(name: DbName): IDbClient {
+export function getDb(name: string = "MAIN"): IDbClient {
   const cached = clientCache.get(name)
   if (cached) return cached
 
-  const entry = databases[name] as DbConfigEntry | undefined
-  if (!entry) {
+  const envResult = resolveFromEnv(name)
+  if (!envResult) {
     throw new DbError({
       category: 'config',
-      devMessage: `Unknown DB name: ${String(name)}`,
+      devMessage: `환경변수 DB_CONNECTION__${name} 이 설정되지 않았습니다`,
     })
   }
 
-  const provider = getProvider(entry.providerName)
-
-  // DSN 은 매 호출마다 새로 파싱하지 않고 lazy + 캐싱.
-  // 단, 키 미설정 등 에러는 첫 query 시점에 명확히 표면화되어야 하므로 함수형으로.
-  let resolved: ResolvedDsn | null = null
-  function getResolved(): ResolvedDsn {
-    if (resolved) return resolved
-    resolved = resolveEntry(entry!)
-    return resolved
-  }
+  const { providerName, dsn, pool } = envResult
+  const provider = getProvider(providerName)
 
   const client: IDbClient = {
     query<T>(sql: string, binds: BindParams = {}, opts: QueryOptions = {}): Promise<QueryResult<T>> {
       return withLifecycle(
-        { dbName: name, provider: entry.providerName, sql, binds, opts, op: 'query' },
+        { dbName: name, provider: providerName, sql, binds, opts, op: 'query' },
         (traceId) =>
-          provider.query<T>(name, getResolved(), entry.pool, sql, binds, { ...opts, traceId }),
-        (rows) => (Array.isArray(rows) ? rows.length : 0),
+          provider.query<T>(name, dsn, pool, sql, binds, { ...opts, traceId }),
+        // (rows) => (Array.isArray(rows) ? rows.length : 0),
+        (r) => r.rows.length,
       )
     },
 
@@ -181,24 +154,60 @@ export function getDb(name: DbName): IDbClient {
       opts: QueryOptions = {},
     ): Promise<ExecuteResult<T>> {
       return withLifecycle(
-        { dbName: name, provider: entry.providerName, sql, binds, opts, op: 'execute' },
+        { dbName: name, provider: providerName, sql, binds, opts, op: 'execute' },
         (traceId) =>
-          provider.execute<T>(name, getResolved(), entry.pool, sql, binds, { ...opts, traceId }),
+          provider.execute<T>(name, dsn, pool, sql, binds, { ...opts, traceId }),
         (r) => r.rowsAffected,
       )
     },
 
     transaction<R>(fn: (tx: IDbClient) => Promise<R>): Promise<R> {
+      const txTraceId = randomUUID()
       return withLifecycle(
         {
           dbName: name,
-          provider: entry.providerName,
+          provider: providerName,
           sql: 'TRANSACTION',
           binds: {},
-          opts: {},
+          opts: { traceId: txTraceId },
           op: 'transaction',
         },
-        () => provider.withTransaction(name, getResolved(), entry.pool, fn),
+        () =>
+          provider.withTransaction(name, dsn, pool, async (rawTx) => {
+            const wrappedTx: IDbClient = {
+              query<T>(sql: string, binds: BindParams = {}, opts: QueryOptions = {}) {
+                return withLifecycle(
+                  {
+                    dbName: name,
+                    provider: providerName,
+                    sql,
+                    binds,
+                    opts: { ...opts, parentTraceId: txTraceId },
+                    op: 'query',
+                  },
+                  (traceId) => rawTx.query<T>(sql, binds, { ...opts, traceId }),
+                  (r) => r.rows.length,
+                )
+              },
+              execute<T>(sql: string, binds: BindParams = {}, opts: QueryOptions = {}) {
+                return withLifecycle(
+                  {
+                    dbName: name,
+                    provider: providerName,
+                    sql,
+                    binds,
+                    opts: { ...opts, parentTraceId: txTraceId },
+                    op: 'execute',
+                  },
+                  (traceId) => rawTx.execute<T>(sql, binds, { ...opts, traceId }),
+                  (r) => r.rowsAffected,
+                )
+              },
+              transaction: rawTx.transaction.bind(rawTx),
+            }
+            return fn(wrappedTx)
+          }),
+
       )
     },
   }
@@ -207,8 +216,25 @@ export function getDb(name: DbName): IDbClient {
   return client
 }
 
+/**
+ * DB 풀을 선제적으로 생성한다(워밍업).
+ * instrumentation.ts 의 server 부팅 훅에서 호출되어 첫 요청의 풀 생성 비용을 제거한다.
+ * 이미 생성된 풀이 있으면 provider 내부 캐시가 no-op 처리한다.
+ */
+export async function warmupDb(name: string): Promise<void> {
+  const envResult = resolveFromEnv(name)
+  if (!envResult) {
+    throw new DbError({
+      category: 'config',
+      devMessage: `환경변수 DB_CONNECTION__${name} 이 설정되지 않았습니다`,
+    })
+  }
+  const { providerName, dsn, pool } = envResult
+  const provider = getProvider(providerName)
+  await provider.warmup(name, dsn, pool)
+}
+
 // ─── 프로세스 종료 훅 ──────────────────────────────────────────────
-// 1회만 등록. dev HMR 누수 방지로 globalThis 플래그 사용.
 const HOOK_FLAG = '__myapp_db_exit_hook__'
 {
   const g = globalThis as unknown as Record<string, boolean | undefined>

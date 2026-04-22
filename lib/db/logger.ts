@@ -1,13 +1,10 @@
 /**
  * @module lib/db/logger
  * @description
- * DB 레이어 전용 구조화 로거.
- * 인터페이스를 통해 후일 pino/winston/OTel 로 무중단 교체 가능.
+ * DB 레이어 전용 구조화 로거. 인터페이스를 통해 후일 pino/winston/OTel 로 무중단 교체 가능.
  *
- * 보안 원칙:
- *  - **bind 값은 절대 로그에 기록하지 않는다** (PII/비밀번호 누출 방지).
- *  - dev 환경에서만 bind 의 *키 목록* 을 출력.
- *  - SQL 은 앞 80 자만 preview 로 남긴다.
+ * 운영 전환 시점에는 `setDbLogger()` 로 Oracle 로그 테이블 insert 구현체 등으로 교체한다.
+ * 단, 그 구현체는 `getDb()` / `withLifecycle` 을 경유해서는 안 된다(무한 재귀).
  */
 
 export interface DbLogger {

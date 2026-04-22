@@ -17,7 +17,7 @@
 
 import { useEffect } from 'react'
 import { Button, Panel, Badge } from '@/components/control'
-import { AppError } from '@/lib/utils/type'
+import { AppError } from '@/lib/utils'
 
 export default function TestCaseError({
   error,
