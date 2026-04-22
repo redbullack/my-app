@@ -140,6 +140,16 @@ export interface IDbProvider {
     fn: (tx: IDbClient) => Promise<R>,
   ): Promise<R>
 
+  /**
+   * 풀을 선제적으로 생성·초기화한다. 이미 생성된 풀이 있으면 no-op.
+   * 서버 부팅 시점의 워밍업 용도로 호출된다.
+   */
+  warmup(
+    dbName: string,
+    dsn: ResolvedDsn,
+    pool: PoolOptions | undefined,
+  ): Promise<void>
+
   closePool(dbName: string): Promise<void>
   closeAll(): Promise<void>
 }
