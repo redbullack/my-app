@@ -17,6 +17,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { getRequestContext } from '@/lib/utils/server/requestContext'
 import { DbError } from './errors'
 import { getDbLogger } from './logger'
 import { closeAllProviders, getProvider } from './providers'
@@ -52,12 +53,32 @@ async function withLifecycle<R>(
   const log = getDbLogger()
   const start = Date.now()
 
-  const parentTraceId = args.opts.parentTraceId
+  // 요청 컨텍스트(ALS) — actionAgent 에서 주입된 세션/액션/페이지 정보.
+  // 스코프 바깥에서 호출되는 경우(예: warmup) 빈 객체로 안전하게 동작.
+  const reqCtx = getRequestContext()
+
+  // traceId 통합: transaction 내부의 parentTraceId 가 명시되어 있으면 그대로,
+  // 아니면 액션 단위 traceId(ALS) 를 parentTraceId 로 사용.
+  const parentTraceId = args.opts.parentTraceId ?? reqCtx.traceId
+
+  // 모든 로그 라인에 공통으로 부착될 요청 컨텍스트 필드.
+  const ctxFields = {
+    actionName: reqCtx.actionName,
+    pagePath: reqCtx.pagePath,
+    userId: reqCtx.userId,
+    userName: reqCtx.userName,
+    role: reqCtx.role,
+    empno: reqCtx.empno,
+  }
+
+  // 로깅 opt-in: actionAgent / withPageContext / withRouteContext 등 사용자 유발 진입점에서만 true.
+  // NextAuth 세션 조회, warmup 등 프레임워크 내부 쿼리는 이 플래그가 없어 자동으로 로그에서 제외된다.
+  const loggable = reqCtx.loggable === true
 
   try {
     const result = await run(traceId)
     const durationMs = Date.now() - start
-    log.info('db.ok', {
+    if (loggable) log.info('db.ok', {
       db: args.dbName,
       provider: args.provider,
       op: args.op,
@@ -67,6 +88,7 @@ async function withLifecycle<R>(
       sql: args.sql,
       binds: args.binds,
       rowCount: countRows ? countRows(result) : undefined,
+      ...ctxFields,
     })
     return result
   } catch (err) {
@@ -76,7 +98,7 @@ async function withLifecycle<R>(
       (err as DbError & { __loggedByLifecycle?: boolean }).__loggedByLifecycle === true
 
     if (err instanceof DbError) {
-      if (!alreadyLogged) {
+      if (!alreadyLogged && loggable) {
         log.error('db.err', {
           db: args.dbName,
           provider: args.provider,
@@ -90,8 +112,25 @@ async function withLifecycle<R>(
           code: err.code,
           devMessage: err.devMessage,
           cause: err.cause instanceof Error ? err.cause.message : String(err.cause ?? ''),
+          ...ctxFields,
         })
           ; (err as DbError & { __loggedByLifecycle?: boolean }).__loggedByLifecycle = true
+      } else if (args.op === 'transaction' && loggable) {
+        // 하위 쿼리에서 이미 로깅되었더라도, 트랜잭션 단위 실패 집계를 위해 요약 1줄 추가.
+        log.error('db.err', {
+          db: args.dbName,
+          provider: args.provider,
+          op: 'transaction',
+          traceId,
+          parentTraceId,
+          durationMs,
+          sql: args.sql,
+          category: err.category,
+          code: err.code,
+          devMessage: err.devMessage,
+          cause: err.cause instanceof Error ? err.cause.message : String(err.cause ?? ''),
+          ...ctxFields,
+        })
       }
       throw err
     }
@@ -101,19 +140,22 @@ async function withLifecycle<R>(
       cause: err,
       devMessage: 'Unhandled error in DB lifecycle',
     })
-    log.error('db.err', {
-      db: args.dbName,
-      provider: args.provider,
-      op: args.op,
-      traceId,
-      parentTraceId,
-      durationMs,
-      sql: args.sql,
-      binds: args.binds,
-      category: 'unknown',
-      cause: err instanceof Error ? err.message : String(err),
-    })
-      ; (wrapped as DbError & { __loggedByLifecycle?: boolean }).__loggedByLifecycle = true
+    if (loggable) {
+      log.error('db.err', {
+        db: args.dbName,
+        provider: args.provider,
+        op: args.op,
+        traceId,
+        parentTraceId,
+        durationMs,
+        sql: args.sql,
+        binds: args.binds,
+        category: 'unknown',
+        cause: err instanceof Error ? err.message : String(err),
+        ...ctxFields,
+      })
+        ; (wrapped as DbError & { __loggedByLifecycle?: boolean }).__loggedByLifecycle = true
+    }
     throw wrapped
   }
 }
