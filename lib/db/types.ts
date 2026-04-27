@@ -67,9 +67,17 @@ export interface IDbClient {
   /**
    * 트랜잭션. 콜백 내부의 모든 query/execute 는 동일 커넥션 위에서 수행되며,
    * 콜백이 정상 종료되면 commit, throw 하면 rollback 후 에러 재전파.
+   *
+   * 콜백이 받는 `tx` 는 `ITxClient` — 중첩 트랜잭션 호출을 컴파일 타임에 차단.
    */
-  transaction<R>(fn: (tx: IDbClient) => Promise<R>): Promise<R>
+  transaction<R>(fn: (tx: ITxClient) => Promise<R>): Promise<R>
 }
+
+/**
+ * 트랜잭션 콜백 내부에서 사용하는 클라이언트.
+ * `query` / `execute` 만 노출하며, 중첩 `transaction()` 호출을 타입 수준에서 차단한다.
+ */
+export type ITxClient = Omit<IDbClient, 'transaction'>
 
 /** 풀 옵션. 미지정 항목은 provider 기본값 사용. */
 export interface PoolOptions {
@@ -118,7 +126,7 @@ export interface IDbProvider {
     dbName: string,
     dsn: ResolvedDsn,
     pool: PoolOptions | undefined,
-    fn: (tx: IDbClient) => Promise<R>,
+    fn: (tx: ITxClient) => Promise<R>,
   ): Promise<R>
 
   /**

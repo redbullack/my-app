@@ -26,6 +26,7 @@ import type {
   BindParams,
   ExecuteResult,
   IDbClient,
+  ITxClient,
   ProviderName,
   QueryOptions,
   QueryResult
@@ -161,6 +162,39 @@ async function withLifecycle<R>(
 }
 
 /**
+ * query/execute 를 withLifecycle 로 감싼 ITxClient 를 생성한다.
+ * 외부 클라이언트와 트랜잭션 내부 클라이언트 모두 이 함수로 만든다.
+ * parentTraceId 를 넘기면 내부 쿼리 로그가 트랜잭션 단위로 묶인다.
+ */
+function makeClient(
+  name: string,
+  providerName: ProviderName,
+  raw: Pick<ITxClient, 'query' | 'execute'>,
+  parentTraceId?: string,
+): ITxClient {
+  return {
+    query<T>(sql: string, binds: BindParams = {}, opts: QueryOptions = {}): Promise<QueryResult<T>> {
+      return withLifecycle(
+        { dbName: name, provider: providerName, sql, binds,
+          opts: parentTraceId ? { ...opts, parentTraceId } : opts,
+          op: 'query' },
+        (traceId) => raw.query<T>(sql, binds, { ...opts, traceId }),
+        (r) => r.rows.length,
+      )
+    },
+    execute<T>(sql: string, binds: BindParams = {}, opts: QueryOptions = {}): Promise<ExecuteResult<T>> {
+      return withLifecycle(
+        { dbName: name, provider: providerName, sql, binds,
+          opts: parentTraceId ? { ...opts, parentTraceId } : opts,
+          op: 'execute' },
+        (traceId) => raw.execute<T>(sql, binds, { ...opts, traceId }),
+        (r) => r.rowsAffected,
+      )
+    },
+  }
+}
+
+/**
  * 환경변수 전용 DB 팩토리.
  * @param name 환경변수 `DB_CONNECTION__<name>` 에 대응하는 DB 식별자.
  */
@@ -180,76 +214,19 @@ export function getDb(name: string = "MAIN"): IDbClient {
   const provider = getProvider(providerName)
 
   const client: IDbClient = {
-    query<T>(sql: string, binds: BindParams = {}, opts: QueryOptions = {}): Promise<QueryResult<T>> {
-      return withLifecycle(
-        { dbName: name, provider: providerName, sql, binds, opts, op: 'query' },
-        (traceId) =>
-          provider.query<T>(name, dsn, pool, sql, binds, { ...opts, traceId }),
-        // (rows) => (Array.isArray(rows) ? rows.length : 0),
-        (r) => r.rows.length,
-      )
-    },
+    ...makeClient(name, providerName, {
+      query:   (sql, binds, opts) => provider.query(name, dsn, pool, sql, binds!, opts!),
+      execute: (sql, binds, opts) => provider.execute(name, dsn, pool, sql, binds!, opts!),
+    }),
 
-    execute<T>(
-      sql: string,
-      binds: BindParams = {},
-      opts: QueryOptions = {},
-    ): Promise<ExecuteResult<T>> {
-      return withLifecycle(
-        { dbName: name, provider: providerName, sql, binds, opts, op: 'execute' },
-        (traceId) =>
-          provider.execute<T>(name, dsn, pool, sql, binds, { ...opts, traceId }),
-        (r) => r.rowsAffected,
-      )
-    },
-
-    transaction<R>(fn: (tx: IDbClient) => Promise<R>): Promise<R> {
+    transaction<R>(fn: (tx: ITxClient) => Promise<R>): Promise<R> {
       const txTraceId = randomUUID()
       return withLifecycle(
-        {
-          dbName: name,
-          provider: providerName,
-          sql: 'TRANSACTION',
-          binds: {},
-          opts: { traceId: txTraceId },
-          op: 'transaction',
-        },
-        () =>
-          provider.withTransaction(name, dsn, pool, async (rawTx) => {
-            const wrappedTx: IDbClient = {
-              query<T>(sql: string, binds: BindParams = {}, opts: QueryOptions = {}) {
-                return withLifecycle(
-                  {
-                    dbName: name,
-                    provider: providerName,
-                    sql,
-                    binds,
-                    opts: { ...opts, parentTraceId: txTraceId },
-                    op: 'query',
-                  },
-                  (traceId) => rawTx.query<T>(sql, binds, { ...opts, traceId }),
-                  (r) => r.rows.length,
-                )
-              },
-              execute<T>(sql: string, binds: BindParams = {}, opts: QueryOptions = {}) {
-                return withLifecycle(
-                  {
-                    dbName: name,
-                    provider: providerName,
-                    sql,
-                    binds,
-                    opts: { ...opts, parentTraceId: txTraceId },
-                    op: 'execute',
-                  },
-                  (traceId) => rawTx.execute<T>(sql, binds, { ...opts, traceId }),
-                  (r) => r.rowsAffected,
-                )
-              },
-              transaction: rawTx.transaction.bind(rawTx),
-            }
-            return fn(wrappedTx)
-          }),
-
+        { dbName: name, provider: providerName, sql: 'TRANSACTION',
+          binds: {}, opts: { traceId: txTraceId }, op: 'transaction' },
+        () => provider.withTransaction(name, dsn, pool, (rawTx) =>
+          fn(makeClient(name, providerName, rawTx, txTraceId))
+        ),
       )
     },
   }
