@@ -1,3 +1,53 @@
+# DB 설계 Q&A
+
+## Q1. `getDb()`를 Class가 아닌 Interface(`IDbClient`) 형태로 사용하는 이유
+
+### (a) 추상화 경계 — Provider 다형성
+`IDbClient`는 "DB가 무엇을 할 수 있는가(query/execute/transaction)"만 정의하고, **누가 어떻게 하는가**(Oracle / Postgres / MSSQL provider)는 `factory.ts`의 `getProvider(providerName)`에서 런타임에 주입된다. 호출자(Server Action)는 provider 종류를 몰라도 동일한 인터페이스로 작업할 수 있다.
+
+### (b) Decorator/Wrapper 패턴 친화적
+`makeClient()`는 raw provider 클라이언트를 받아 `withLifecycle`로 감싼 새 객체를 반환한다. 클래스 상속이었다면 `class LoggedClient extends RawClient` 같은 강결합이 생기지만, 인터페이스는 **객체 합성(composition)** 만으로 로깅/트레이싱 레이어를 끼워넣을 수 있다. 트랜잭션 내부 클라이언트(`ITxClient`, `parentTraceId` 주입판)도 같은 함수로 만들어진다.
+
+### (c) 캐싱 · 테스트 · 트리쉐이킹
+- **캐싱**: `clientCache: Map<string, IDbClient>` — 인터페이스 타입이라 provider 교체 시에도 시그니처가 바뀌지 않음
+- **테스트**: Server Action 테스트에서 `IDbClient`를 만족하는 mock 객체를 그대로 주입 가능 (클래스라면 상속/스파이가 필요)
+- **번들**: 인터페이스는 컴파일 시 소거되어 클라이언트 번들에 누수 위험이 없음
+
+### (d) `'use server'` 친화성
+서버 액션에서 import되는 표면이 "값(클래스)"이 아니라 **"함수(`getDb`) + 타입(`IDbClient`)"** 이라, 직렬화/번들링 경계가 깔끔하다.
+
+### 정리
+*Provider 교체 가능성 + 횡단 관심사(로깅/트레이싱) 합성 + 테스트 용이성* 세 가지를 동시에 얻기 위한 의도적 선택이다.
+
+---
+
+## Q2. C# `OracleConnection.BeginTransaction()` (명시적 begin/commit/rollback) vs 현재 방식 (`transaction(fn => …)` 콜백)
+
+### 현재 방식의 장점
+
+| 항목 | 설명 |
+|---|---|
+| **누수 불가능** | `provider.withTransaction(...)`이 commit/rollback/connection release를 강제로 책임짐. 호출자가 `commit()`을 잊거나 `rollback()`을 누락하는 버그가 원천 차단됨 |
+| **자동 에러 분기** | 콜백이 throw → 자동 rollback, 정상 반환 → 자동 commit. C#의 `try { tx.Commit() } catch { tx.Rollback() }` 보일러플레이트 없음 |
+| **트레이싱 통합** | `txTraceId`가 자동 발급되어 트랜잭션 내부 모든 query/execute 로그에 `parentTraceId`로 묶임. C# 방식은 별도 코드로 직접 전파해야 함 |
+| **타입 격리** | 트랜잭션 내부 전용 클라이언트는 `ITxClient` (transaction 메서드 없음) — 중첩 트랜잭션 같은 잘못된 사용을 컴파일 타임에 차단 |
+| **풀/커넥션 추상화** | 호출자가 connection 객체를 직접 다루지 않으므로 connection leak 불가 |
+
+### 현재 방식의 단점
+
+| 항목 | 설명 |
+|---|---|
+| **세밀한 제어 불가** | C#에서 가능한 *부분 커밋*, *savepoint 후 일부만 rollback*, *조건부 commit 지연* 같은 시나리오를 표현하기 어려움. 현재 인터페이스는 savepoint API가 없음 |
+| **트랜잭션 수명이 콜백에 묶임** | C#은 트랜잭션을 메서드 경계 밖으로 반환하거나 여러 사용자 상호작용 사이에 열어둘 수 있으나, 현재 방식은 콜백 종료 = 트랜잭션 종료 |
+| **격리 수준/읽기 전용 옵션 부재** | `BeginTransaction(IsolationLevel.Serializable)` 같은 옵션을 현재 시그니처(`fn => Promise<R>`)는 노출하지 않음. 필요 시 `transaction(opts, fn)` 형태로 확장 필요 |
+| **콜백 내 비동기 누수 위험** | 사용자가 트랜잭션 콜백 안에서 `setTimeout`이나 외부 Promise를 fire-and-forget 하면, commit 이후 쿼리가 날아가는 버그 가능성 존재 |
+| **디버깅 시 단계 추적 어려움** | C#은 `Commit()`에 직접 브레이크포인트를 걸 수 있지만, 현재 방식은 provider 내부로 들어가야 함 |
+
+### 결론
+현재 방식은 **"99%의 일반적 트랜잭션 케이스에서 안전성을 강제하는 대신, 1%의 비표준 시나리오(부분 커밋, 장기 트랜잭션, 격리 수준 지정)의 유연성을 포기"** 한 트레이드오프이다. 웹 서버의 Server Action 같은 **단발성 요청-응답 패턴**에서는 현재 방식이 명백히 우월하며, 만약 savepoint나 IsolationLevel이 필요해지면 `QueryOptions`나 `transaction(opts, fn)` 시그니처로 점진적 확장이 가능하다.
+
+---
+
 # DB 실행 흐름 분석
 
 ## getDb() 기반 DB 쿼리 실행 흐름

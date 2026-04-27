@@ -175,18 +175,22 @@ function makeClient(
   return {
     query<T>(sql: string, binds: BindParams = {}, opts: QueryOptions = {}): Promise<QueryResult<T>> {
       return withLifecycle(
-        { dbName: name, provider: providerName, sql, binds,
+        {
+          dbName: name, provider: providerName, sql, binds,
           opts: parentTraceId ? { ...opts, parentTraceId } : opts,
-          op: 'query' },
+          op: 'query'
+        },
         (traceId) => raw.query<T>(sql, binds, { ...opts, traceId }),
         (r) => r.rows.length,
       )
     },
     execute<T>(sql: string, binds: BindParams = {}, opts: QueryOptions = {}): Promise<ExecuteResult<T>> {
       return withLifecycle(
-        { dbName: name, provider: providerName, sql, binds,
+        {
+          dbName: name, provider: providerName, sql, binds,
           opts: parentTraceId ? { ...opts, parentTraceId } : opts,
-          op: 'execute' },
+          op: 'execute'
+        },
         (traceId) => raw.execute<T>(sql, binds, { ...opts, traceId }),
         (r) => r.rowsAffected,
       )
@@ -215,15 +219,17 @@ export function getDb(name: string = "MAIN"): IDbClient {
 
   const client: IDbClient = {
     ...makeClient(name, providerName, {
-      query:   (sql, binds, opts) => provider.query(name, dsn, pool, sql, binds!, opts!),
+      query: (sql, binds, opts) => provider.query(name, dsn, pool, sql, binds!, opts!),
       execute: (sql, binds, opts) => provider.execute(name, dsn, pool, sql, binds!, opts!),
     }),
 
     transaction<R>(fn: (tx: ITxClient) => Promise<R>): Promise<R> {
       const txTraceId = randomUUID()
       return withLifecycle(
-        { dbName: name, provider: providerName, sql: 'TRANSACTION',
-          binds: {}, opts: { traceId: txTraceId }, op: 'transaction' },
+        {
+          dbName: name, provider: providerName, sql: 'TRANSACTION',
+          binds: {}, opts: { traceId: txTraceId }, op: 'transaction'
+        },
         () => provider.withTransaction(name, dsn, pool, (rawTx) =>
           fn(makeClient(name, providerName, rawTx, txTraceId))
         ),
