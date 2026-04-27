@@ -8,7 +8,7 @@
  * - runTxRollback: db.transaction() 내에서 UPDATE 후 고의 throw → rollback 검증
  */
 
-import { getDb } from '@/lib/db'
+import { getDb, type ITxClient } from '@/lib/db'
 import { actionAgent } from '@/lib/utils/server'
 
 const db = getDb('MAIN')
@@ -60,7 +60,7 @@ export interface TxTestResult {
 }
 
 async function readSal(
-  client: { query: typeof db.query },
+  client: ITxClient,
   empno: string,
 ): Promise<string | null> {
   const result = await client.query<{ SAL: string | null }>(
