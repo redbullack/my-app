@@ -20,7 +20,6 @@ export { warmupDb } from './factory'
 export { DbError, SAFE_PUBLIC_MESSAGE, type DbErrorCategory } from './errors'
 export type {
   IDbClient,
-  ITxClient,
   BindParams,
   QueryOptions,
   ExecuteResult,
