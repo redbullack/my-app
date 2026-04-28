@@ -32,6 +32,11 @@ export interface QueryOptions {
    * 내부 개별 query/execute 로그를 하나의 트랜잭션으로 묶기 위함.
    */
   parentTraceId?: string
+  /**
+   * 내부 전용 — factory 가 ALS 트랜잭션 컨텍스트에서 provider 로 전달하는 raw 커넥션.
+   * 호출자(서버 액션·라우트 핸들러)는 직접 지정하지 않는다.
+   */
+  conn?: unknown
 }
 
 export type QueryResult<T = Record<string, unknown>> = {
@@ -48,6 +53,10 @@ export type ExecuteResult<T = Record<string, unknown>> = {
 /**
  * 호출자가 사용하는 표준 DB 클라이언트 인터페이스.
  * `getDb(name)` 가 반환하는 객체의 형태.
+ *
+ * 트랜잭션은 `tx(async () => { ... })` 로 시작/종료를 명시한다. 콜백은 인자를 받지 않으며,
+ * 내부의 모든 `db.query/execute` 호출은 ALS 컨텍스트를 통해 자동으로 동일 커넥션을 공유한다.
+ * 콜백이 정상 종료되면 commit, throw 하면 rollback 후 에러 재전파.
  */
 export interface IDbClient {
   /** SELECT 류 — 행 배열 반환. */
@@ -65,19 +74,12 @@ export interface IDbClient {
   ): Promise<ExecuteResult<T>>
 
   /**
-   * 트랜잭션. 콜백 내부의 모든 query/execute 는 동일 커넥션 위에서 수행되며,
-   * 콜백이 정상 종료되면 commit, throw 하면 rollback 후 에러 재전파.
-   *
-   * 콜백이 받는 `tx` 는 `ITxClient` — 중첩 트랜잭션 호출을 컴파일 타임에 차단.
+   * 트랜잭션 스코프. 콜백 안에서 동일 `db` 의 query/execute 를 호출하면
+   * ALS 컨텍스트를 통해 자동으로 같은 커넥션 위에서 수행된다.
+   * 동일 DB 의 중첩 호출은 런타임에 차단된다.
    */
-  transaction<R>(fn: (tx: ITxClient) => Promise<R>): Promise<R>
+  tx<R>(fn: () => Promise<R>): Promise<R>
 }
-
-/**
- * 트랜잭션 콜백 내부에서 사용하는 클라이언트.
- * `query` / `execute` 만 노출하며, 중첩 `transaction()` 호출을 타입 수준에서 차단한다.
- */
-export type ITxClient = Omit<IDbClient, 'transaction'>
 
 /** 풀 옵션. 미지정 항목은 provider 기본값 사용. */
 export interface PoolOptions {
@@ -122,12 +124,24 @@ export interface IDbProvider {
     opts: QueryOptions,
   ): Promise<ExecuteResult<T>>
 
-  withTransaction<R>(
+  /**
+   * 트랜잭션용 raw 커넥션을 풀에서 빌린다. autoCommit 비활성 모드로 사용된다.
+   * factory 가 ALS 컨텍스트를 만들 때 1회 호출하며, commit/rollback/release 는 별도 훅으로 처리한다.
+   */
+  acquireTxConnection(
     dbName: string,
     dsn: ResolvedDsn,
     pool: PoolOptions | undefined,
-    fn: (tx: ITxClient) => Promise<R>,
-  ): Promise<R>
+  ): Promise<unknown>
+
+  /** 트랜잭션 커밋. */
+  commit(conn: unknown): Promise<void>
+
+  /** 트랜잭션 롤백. 실패해도 원본 에러를 가리지 않도록 호출자가 swallow 한다. */
+  rollback(conn: unknown): Promise<void>
+
+  /** 커넥션 풀 반납. 실패는 무시. */
+  release(conn: unknown): Promise<void>
 
   /**
    * 풀을 선제적으로 생성·초기화한다. 이미 생성된 풀이 있으면 no-op.

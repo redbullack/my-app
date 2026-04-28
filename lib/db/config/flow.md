@@ -3,10 +3,10 @@
 ## Q1. `getDb()`를 Class가 아닌 Interface(`IDbClient`) 형태로 사용하는 이유
 
 ### (a) 추상화 경계 — Provider 다형성
-`IDbClient`는 "DB가 무엇을 할 수 있는가(query/execute/transaction)"만 정의하고, **누가 어떻게 하는가**(Oracle / Postgres / MSSQL provider)는 `factory.ts`의 `getProvider(providerName)`에서 런타임에 주입된다. 호출자(Server Action)는 provider 종류를 몰라도 동일한 인터페이스로 작업할 수 있다.
+`IDbClient`는 "DB가 무엇을 할 수 있는가(query/execute/tx)"만 정의하고, **누가 어떻게 하는가**(Oracle / Postgres / MSSQL provider)는 `factory.ts`의 `getProvider(providerName)`에서 런타임에 주입된다. 호출자(Server Action)는 provider 종류를 몰라도 동일한 인터페이스로 작업할 수 있다.
 
 ### (b) Decorator/Wrapper 패턴 친화적
-`makeClient()`는 raw provider 클라이언트를 받아 `withLifecycle`로 감싼 새 객체를 반환한다. 클래스 상속이었다면 `class LoggedClient extends RawClient` 같은 강결합이 생기지만, 인터페이스는 **객체 합성(composition)** 만으로 로깅/트레이싱 레이어를 끼워넣을 수 있다. 트랜잭션 내부 클라이언트(`ITxClient`, `parentTraceId` 주입판)도 같은 함수로 만들어진다.
+`getDb()` 안에서 query/execute/tx 메서드를 직접 구성하며, 각 메서드 본문은 `withLifecycle` 로 감싸 시간 측정/로깅/DbError 변환을 단일 지점에서 처리한다. 클래스 상속이었다면 `class LoggedClient extends RawClient` 같은 강결합이 생기지만, 인터페이스는 **객체 합성(composition)** 만으로 로깅/트레이싱 레이어를 끼워넣을 수 있다. 트랜잭션 내부 호출도 별도 클라이언트를 만들지 않고, `AsyncLocalStorage` 기반 `txStore` 에서 raw 커넥션을 꺼내 provider 로 전달한다.
 
 ### (c) 캐싱 · 테스트 · 트리쉐이킹
 - **캐싱**: `clientCache: Map<string, IDbClient>` — 인터페이스 타입이라 provider 교체 시에도 시그니처가 바뀌지 않음
@@ -21,16 +21,17 @@
 
 ---
 
-## Q2. C# `OracleConnection.BeginTransaction()` (명시적 begin/commit/rollback) vs 현재 방식 (`transaction(fn => …)` 콜백)
+## Q2. C# `OracleConnection.BeginTransaction()` (명시적 begin/commit/rollback) vs 현재 방식 (`db.tx(async () => …)` 콜백 + ALS)
 
 ### 현재 방식의 장점
 
 | 항목 | 설명 |
 |---|---|
-| **누수 불가능** | `provider.withTransaction(...)`이 commit/rollback/connection release를 강제로 책임짐. 호출자가 `commit()`을 잊거나 `rollback()`을 누락하는 버그가 원천 차단됨 |
+| **누수 불가능** | `db.tx(...)` 가 acquire/commit/rollback/release 라이프사이클을 강제로 책임짐. 호출자가 `commit()`을 잊거나 `rollback()`을 누락하는 버그가 원천 차단됨 |
 | **자동 에러 분기** | 콜백이 throw → 자동 rollback, 정상 반환 → 자동 commit. C#의 `try { tx.Commit() } catch { tx.Rollback() }` 보일러플레이트 없음 |
 | **트레이싱 통합** | `txTraceId`가 자동 발급되어 트랜잭션 내부 모든 query/execute 로그에 `parentTraceId`로 묶임. C# 방식은 별도 코드로 직접 전파해야 함 |
-| **타입 격리** | 트랜잭션 내부 전용 클라이언트는 `ITxClient` (transaction 메서드 없음) — 중첩 트랜잭션 같은 잘못된 사용을 컴파일 타임에 차단 |
+| **헬퍼 무수정 재사용** | 콜백이 인자를 받지 않고 ALS 로 트랜잭션 커넥션이 흐르므로, `readSal(empno)` 같은 헬퍼가 트랜잭션 안/밖에서 동일한 시그니처로 호출됨. C# 방식은 `tx` 객체를 인자로 일일이 전달해야 함 |
+| **중첩/await 누락 가드** | 동일 DB 의 중첩 `tx()` 는 런타임에 차단되고, in-flight 카운터로 `forEach(async)` 같은 await 누락이 자동 검출되어 rollback 됨 |
 | **풀/커넥션 추상화** | 호출자가 connection 객체를 직접 다루지 않으므로 connection leak 불가 |
 
 ### 현재 방식의 단점
@@ -159,13 +160,13 @@ withLifecycle 내부
 #### 2-D. 트랜잭션 내부 에러
 
 ```
-client.transaction(async (tx) => {
-  await tx.query(...)  // 성공
-  await tx.execute(...) // 여기서 에러!
+db.tx(async () => {
+  await db.query(...)  // 성공 — ALS 컨텍스트의 tx 커넥션에서 실행
+  await db.execute(...) // 여기서 에러!
 })
   │
-  ├─ provider.withTransaction 내부에서
-  │   에러 발생 → ROLLBACK 수행 (provider 책임)
+  ├─ factory.ts 의 tx() 가 provider.rollback(conn) 호출
+  │   (provider 는 commit/rollback/release 4 훅만 제공)
   │
   ├─ withLifecycle의 catch로 전파       ← :148-158
   │   (2-B 또는 2-C 루트와 동일)

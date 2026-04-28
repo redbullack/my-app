@@ -2,7 +2,7 @@
  * @route /test-0419
  * @pattern Server Action + Transaction 테스트
  * @description
- * `lib/db/providers/oracle.ts` 의 withTransaction(= db.transaction) 동작 검증용 페이지.
+ * `lib/db/factory.ts` 의 ALS 기반 `db.tx(async () => ...)` 동작 검증용 페이지.
  * - 조회 버튼: SCOTT.EMP 단순 조회
  * - Commit 테스트: 두 건 SAL +delta → 커밋 후 before/after 비교
  * - Rollback 테스트: 두 건 SAL +delta 후 고의 throw → 롤백되어 원복되는지 확인
@@ -163,9 +163,9 @@ export default function Test0419Page() {
 
         <div className="mt-6">
           <RouteInfo
-            pattern="Server Action + Oracle withTransaction"
+            pattern="Server Action + db.tx() (ALS 트랜잭션)"
             syntax="app/test-0419/page.tsx"
-            description="db.transaction() 콜백 내 여러 UPDATE 가 단일 커넥션 위에서 원자적으로 commit/rollback 되는지 검증합니다."
+            description="db.tx() 콜백 내 여러 UPDATE 가 단일 커넥션 위에서 원자적으로 commit/rollback 되는지 검증합니다."
             docsUrl="https://nextjs.org/docs/app/building-your-application/data-fetching/server-actions-and-mutations"
           />
         </div>

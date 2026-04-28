@@ -11,7 +11,6 @@ import oracledb from 'oracledb'
 import type {
   BindParams,
   ExecuteResult,
-  IDbClient,
   IDbProvider,
   PoolOptions,
   QueryOptions,
@@ -188,6 +187,20 @@ async function oracleQuery<T>(
   binds: BindParams,
   opts: QueryOptions,
 ): Promise<QueryResult<T>> {
+  // 트랜잭션 컨텍스트(factory ALS) 에서 전달된 raw 커넥션이 있으면 풀에서 빌리지 않고 그 위에서 실행한다.
+  if (opts.conn) {
+    const conn = opts.conn as oracledb.Connection
+    try {
+      const result = await runOnConnection<T>(conn, sql, binds, opts, false)
+      return {
+        columns: toColumns(result.metaData),
+        rows: (result.rows ?? []) as T[],
+      }
+    } catch (err) {
+      throw toDbError(err, dbName, opts.traceId)
+    }
+  }
+
   const p = await getPool(dbName, dsn, pool)
   const conn = await p.getConnection()
   try {
@@ -215,6 +228,19 @@ async function oracleExecute<T>(
   binds: BindParams,
   opts: QueryOptions,
 ): Promise<ExecuteResult<T>> {
+  if (opts.conn) {
+    const conn = opts.conn as oracledb.Connection
+    try {
+      const result = await runOnConnection<T>(conn, sql, binds, opts, false)
+      return {
+        rows: (result.rows ?? []) as T[],
+        rowsAffected: result.rowsAffected ?? 0,
+      }
+    } catch (err) {
+      throw toDbError(err, dbName, opts.traceId)
+    }
+  }
+
   const p = await getPool(dbName, dsn, pool)
   const conn = await p.getConnection()
   try {
@@ -234,70 +260,28 @@ async function oracleExecute<T>(
   }
 }
 
-async function oracleWithTransaction<R>(
+async function oracleAcquireTxConnection(
   dbName: string,
   dsn: ResolvedDsn,
   pool: PoolOptions | undefined,
-  fn: (tx: IDbClient) => Promise<R>,
-): Promise<R> {
+): Promise<unknown> {
   const p = await getPool(dbName, dsn, pool)
-  const conn = await p.getConnection()
+  return p.getConnection()
+}
 
-  // 트랜잭션 내부 클라이언트 — 동일 conn 위에서 동작, autoCommit=false
-  const tx: IDbClient = {
-    async query<T>(sql: string, binds: BindParams = {}, opts: QueryOptions = {}): Promise<QueryResult<T>> {
-      try {
-        const result = await runOnConnection<T>(conn, sql, binds, opts, false)
-        return {
-          columns: toColumns(result.metaData),
-          rows: (result.rows ?? []) as T[],
-        }
-      } catch (err) {
-        throw toDbError(err, dbName, opts.traceId)
-      }
-    },
-    async execute<T>(
-      sql: string,
-      binds: BindParams = {},
-      opts: QueryOptions = {},
-    ): Promise<ExecuteResult<T>> {
-      try {
-        const result = await runOnConnection<T>(conn, sql, binds, opts, false)
-        return {
-          rows: (result.rows ?? []) as T[],
-          rowsAffected: result.rowsAffected ?? 0,
-        }
-      } catch (err) {
-        throw toDbError(err, dbName, opts.traceId)
-      }
-    },
-    transaction() {
-      throw new DbError({
-        category: 'config',
-        devMessage:
-          '중첩 트랜잭션은 지원하지 않습니다. 단일 transaction 콜백 안에서 모든 query/execute 를 수행하세요.',
-      })
-    },
-  }
+async function oracleCommit(conn: unknown): Promise<void> {
+  await (conn as oracledb.Connection).commit()
+}
 
+async function oracleRollback(conn: unknown): Promise<void> {
+  await (conn as oracledb.Connection).rollback()
+}
+
+async function oracleRelease(conn: unknown): Promise<void> {
   try {
-    const result = await fn(tx)
-    await conn.commit()
-    return result
-  } catch (err) {
-    try {
-      await conn.rollback()
-    } catch {
-      /* rollback 실패는 원본 에러를 가리지 않도록 무시 */
-    }
-    if (err instanceof DbError) throw err
-    throw toDbError(err, dbName, undefined)
-  } finally {
-    try {
-      await conn.close()
-    } catch {
-      /* noop */
-    }
+    await (conn as oracledb.Connection).close()
+  } catch {
+    /* noop */
   }
 }
 
@@ -341,7 +325,10 @@ async function oracleCloseAll(): Promise<void> {
 export const oracleProvider: IDbProvider = {
   query: oracleQuery,
   execute: oracleExecute,
-  withTransaction: oracleWithTransaction,
+  acquireTxConnection: oracleAcquireTxConnection,
+  commit: oracleCommit,
+  rollback: oracleRollback,
+  release: oracleRelease,
   warmup: oracleWarmup,
   closePool: oracleClosePool,
   closeAll: oracleCloseAll,
