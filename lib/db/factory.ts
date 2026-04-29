@@ -58,16 +58,8 @@ interface TxState {
 /** dbName → TxState. ALS 스코프별로 독립. */
 const txStore = new AsyncLocalStorage<Map<string, TxState>>()
 
-/**
- * 클라이언트 캐시. dev HMR 환경에서 factory 모듈이 재평가되어도 동일 인스턴스를 재사용하기 위해
- * globalThis 에 보관한다(oracle 풀 캐시와 동일 패턴).
- */
-const CLIENT_CACHE_KEY = '__myapp_db_client_cache__'
-function getClientCache(): Map<string, IDbClient> {
-  const g = globalThis as unknown as Record<string, Map<string, IDbClient> | undefined>
-  if (!g[CLIENT_CACHE_KEY]) g[CLIENT_CACHE_KEY] = new Map()
-  return g[CLIENT_CACHE_KEY]!
-}
+/** 클라이언트 캐시. 모듈 스코프에 보관하여 HMR 시 재생성되도록 한다. */
+const clientCache = new Map<string, IDbClient>()
 
 /**
  * DB 이름 화이트리스트.
@@ -229,7 +221,6 @@ async function withLifecycle<R>(
  */
 export function getDb(name: string = 'MAIN'): IDbClient {
   // assertValidDbName(name)
-  const clientCache = getClientCache()
   const cached = clientCache.get(name)
   if (cached) return cached
 
