@@ -13,7 +13,7 @@ import type {
   ExecuteResult,
   IDbProvider,
   PoolOptions,
-  QueryOptions,
+  InternalQueryOptions,
   QueryResult,
   ResolvedDsn,
 } from '../types'
@@ -145,7 +145,7 @@ async function getPool(
   return p
 }
 
-function toExecuteOptions(opts: QueryOptions, autoCommit: boolean): oracledb.ExecuteOptions {
+function toExecuteOptions(opts: InternalQueryOptions, autoCommit: boolean): oracledb.ExecuteOptions {
   const out: oracledb.ExecuteOptions = {
     outFormat: oracledb.OUT_FORMAT_OBJECT,
     autoCommit,
@@ -169,7 +169,7 @@ async function runOnConnection<T>(
   conn: oracledb.Connection,
   sql: string,
   binds: BindParams,
-  opts: QueryOptions,
+  opts: InternalQueryOptions,
   autoCommit: boolean,
 ): Promise<oracledb.Result<T>> {
   // oracledb 의 timeout 은 connection.callTimeout (ms)
@@ -185,7 +185,7 @@ async function oracleQuery<T>(
   pool: PoolOptions | undefined,
   sql: string,
   binds: BindParams,
-  opts: QueryOptions,
+  opts: InternalQueryOptions,
 ): Promise<QueryResult<T>> {
   // 트랜잭션 컨텍스트(factory ALS) 에서 전달된 raw 커넥션이 있으면 풀에서 빌리지 않고 그 위에서 실행한다.
   if (opts.conn) {
@@ -226,7 +226,7 @@ async function oracleExecute<T>(
   pool: PoolOptions | undefined,
   sql: string,
   binds: BindParams,
-  opts: QueryOptions,
+  opts: InternalQueryOptions,
 ): Promise<ExecuteResult<T>> {
   if (opts.conn) {
     const conn = opts.conn as oracledb.Connection
