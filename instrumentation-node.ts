@@ -33,7 +33,9 @@ export async function registerNode(): Promise<void> {
   const criticalDbs = ['MAIN'] as const
 
   try {
-    const { warmupDb } = await import('@/lib/db')
+    // warmupDb 는 부팅 훅 전용이라 공개 배럴(@/lib/db) 에서 export 하지 않는다.
+    // 본 파일은 eslint.config.mjs 에서 deep-import 차단 규칙을 명시적으로 면제한다.
+    const { warmupDb } = await import('@/lib/db/factory')
 
     await Promise.all(
       criticalDbs.map(async (name) => {

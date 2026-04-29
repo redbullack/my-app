@@ -15,6 +15,8 @@
  *
  * - 동일 DB 의 중첩 `tx()` 호출은 런타임에 차단된다.
  * - 다른 DB 의 `tx()` 는 자유롭게 중첩 가능하며 각자 독립적으로 commit/rollback 된다.
+ *   ⚠️ 분산 트랜잭션(XA) 이 아니므로, 자식 tx 가 commit 된 후 부모 tx 가 rollback 되면
+ *   자식 변경은 보존된다. 강한 원자성이 필요하면 단일 DB 안에서 작업을 모아야 한다.
  * - `closing` 플래그로 commit/rollback 진행 후의 잔여 호출을 차단한다.
  * - `inflight` 카운터로 await 누락(`forEach(async)`) 을 감지하여 자동 rollback 시킨다.
  *
@@ -55,7 +57,37 @@ interface TxState {
 
 /** dbName → TxState. ALS 스코프별로 독립. */
 const txStore = new AsyncLocalStorage<Map<string, TxState>>()
+
+/** 클라이언트 캐시. 모듈 스코프에 보관하여 HMR 시 재생성되도록 한다. */
 const clientCache = new Map<string, IDbClient>()
+
+/**
+ * DB 이름 화이트리스트.
+ * 환경변수 키(`DB_CONNECTION__<NAME>`) 의 일부로 그대로 합성되므로,
+ * 외부 입력이 흘러들어와 임의 환경변수를 prove 하는 표면을 만들지 않도록
+ * 형식을 강하게 제한한다(대문자/숫자/언더스코어, 첫 글자 영문).
+ */
+const DB_NAME_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/
+function assertValidDbName(name: string): void {
+  if (!DB_NAME_PATTERN.test(name)) {
+    throw new DbError({
+      category: 'config',
+      devMessage: `잘못된 DB 이름: "${name}". 대문자로 시작하고 [A-Z0-9_] 만 허용됩니다(최대 64자).`,
+    })
+  }
+}
+
+/**
+ * 외부에서 전달된 옵션을 공개 필드(maxRows/timeoutMs)만 남기도록 정제한다.
+ * `conn`/`traceId`/`parentTraceId` 같은 internal 메타가 caller 의 우회로 주입되어
+ * provider 까지 흘러가는 것을 차단한다.
+ */
+function pickPublicOpts(opts: QueryOptions): QueryOptions {
+  const out: QueryOptions = {}
+  if (typeof opts.maxRows === 'number') out.maxRows = opts.maxRows
+  if (typeof opts.timeoutMs === 'number') out.timeoutMs = opts.timeoutMs
+  return out
+}
 
 /**
  * 모든 query/execute/tx 의 공통 lifecycle.
@@ -188,6 +220,7 @@ async function withLifecycle<R>(
  * @param name 환경변수 `DB_CONNECTION__<name>` 에 대응하는 DB 식별자.
  */
 export function getDb(name: string = 'MAIN'): IDbClient {
+  // assertValidDbName(name)
   const cached = clientCache.get(name)
   if (cached) return cached
 
@@ -204,8 +237,9 @@ export function getDb(name: string = 'MAIN'): IDbClient {
 
   const client: IDbClient = {
     query<T>(sql: string, binds: BindParams = {}, opts: QueryOptions = {}) {
+      const safeOpts = pickPublicOpts(opts)
       return withLifecycle(
-        { dbName: name, provider: providerName, sql, binds, opts, op: 'query' },
+        { dbName: name, provider: providerName, sql, binds, opts: safeOpts, op: 'query' },
         async (traceId) => {
           const st = txStore.getStore()?.get(name)
           if (st) {
@@ -218,7 +252,7 @@ export function getDb(name: string = 'MAIN'): IDbClient {
             st.inflight++
             try {
               return await provider.query<T>(name, dsn, pool, sql, binds, {
-                ...opts,
+                ...safeOpts,
                 traceId,
                 conn: st.conn,
               })
@@ -226,15 +260,16 @@ export function getDb(name: string = 'MAIN'): IDbClient {
               st.inflight--
             }
           }
-          return provider.query<T>(name, dsn, pool, sql, binds, { ...opts, traceId })
+          return provider.query<T>(name, dsn, pool, sql, binds, { ...safeOpts, traceId })
         },
         (r) => r.rows.length,
       )
     },
 
     execute<T>(sql: string, binds: BindParams = {}, opts: QueryOptions = {}) {
+      const safeOpts = pickPublicOpts(opts)
       return withLifecycle(
-        { dbName: name, provider: providerName, sql, binds, opts, op: 'execute' },
+        { dbName: name, provider: providerName, sql, binds, opts: safeOpts, op: 'execute' },
         async (traceId) => {
           const st = txStore.getStore()?.get(name)
           if (st) {
@@ -247,7 +282,7 @@ export function getDb(name: string = 'MAIN'): IDbClient {
             st.inflight++
             try {
               return await provider.execute<T>(name, dsn, pool, sql, binds, {
-                ...opts,
+                ...safeOpts,
                 traceId,
                 conn: st.conn,
               })
@@ -255,7 +290,7 @@ export function getDb(name: string = 'MAIN'): IDbClient {
               st.inflight--
             }
           }
-          return provider.execute<T>(name, dsn, pool, sql, binds, { ...opts, traceId })
+          return provider.execute<T>(name, dsn, pool, sql, binds, { ...safeOpts, traceId })
         },
         (r) => r.rowsAffected,
       )
@@ -323,6 +358,7 @@ export function getDb(name: string = 'MAIN'): IDbClient {
  * 이미 생성된 풀이 있으면 provider 내부 캐시가 no-op 처리한다.
  */
 export async function warmupDb(name: string): Promise<void> {
+  // assertValidDbName(name)
   const envResult = resolveFromEnv(name)
   if (!envResult) {
     throw new DbError({
