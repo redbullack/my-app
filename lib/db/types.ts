@@ -16,15 +16,25 @@ export type ProviderName = 'oracle' // | 'postgres' | 'mariadb'
  */
 export type BindParams = Record<string, unknown> | unknown[]
 
-/** 쿼리별 옵션. 모두 선택. */
+/**
+ * 쿼리별 공개 옵션. 호출자(서버 액션·라우트 핸들러)가 사용 가능한 필드는 이게 전부다.
+ * traceId/parentTraceId/conn 같은 메타는 factory 가 자동 주입하므로 의도적으로 노출하지 않는다.
+ */
 export interface QueryOptions {
   /** 최대 반환 행 수. provider 가 지원하면 적용. */
   maxRows?: number
   /** 쿼리 타임아웃(ms). provider 가 지원하면 적용. */
   timeoutMs?: number
+}
+
+/**
+ * factory ↔ provider 사이에서만 사용하는 내부 옵션.
+ * 공개 `QueryOptions` 를 확장하여 trace / 트랜잭션 raw 커넥션 메타를 덧붙인다.
+ * provider 구현체는 이 타입을 받지만, IDbClient 를 통해 호출하는 외부 코드는 도달할 수 없다.
+ */
+export interface InternalQueryOptions extends QueryOptions {
   /**
-   * 로그 상관관계용 trace ID.
-   * 미지정 시 factory 에서 자동 생성하여 모든 로그 라인에 기록.
+   * 로그 상관관계용 trace ID. factory 의 `withLifecycle` 에서 자동 발급.
    */
   traceId?: string
   /**
@@ -33,8 +43,7 @@ export interface QueryOptions {
    */
   parentTraceId?: string
   /**
-   * 내부 전용 — factory 가 ALS 트랜잭션 컨텍스트에서 provider 로 전달하는 raw 커넥션.
-   * 호출자(서버 액션·라우트 핸들러)는 직접 지정하지 않는다.
+   * factory 가 ALS 트랜잭션 컨텍스트에서 provider 로 전달하는 raw 커넥션.
    */
   conn?: unknown
 }
@@ -112,7 +121,7 @@ export interface IDbProvider {
     pool: PoolOptions | undefined,
     sql: string,
     binds: BindParams,
-    opts: QueryOptions,
+    opts: InternalQueryOptions,
   ): Promise<QueryResult<T>>
 
   execute<T>(
@@ -121,7 +130,7 @@ export interface IDbProvider {
     pool: PoolOptions | undefined,
     sql: string,
     binds: BindParams,
-    opts: QueryOptions,
+    opts: InternalQueryOptions,
   ): Promise<ExecuteResult<T>>
 
   /**

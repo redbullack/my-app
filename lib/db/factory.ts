@@ -73,7 +73,7 @@ async function withLifecycle<R>(
   run: (traceId: string) => Promise<R>,
   countRows?: (r: R) => number,
 ): Promise<R> {
-  const traceId = args.opts.traceId ?? randomUUID()
+  const traceId = randomUUID()
   const log = getDbLogger()
   const start = Date.now()
 
@@ -81,13 +81,11 @@ async function withLifecycle<R>(
   // 스코프 바깥에서 호출되는 경우(예: warmup) 빈 객체로 안전하게 동작.
   const reqCtx = getRequestContext()
 
-  // traceId 통합 우선순위:
-  //   1) 명시된 parentTraceId (호출자가 직접 지정)
-  //   2) 트랜잭션 ALS 의 tx traceId (동일 DB 의 tx 안인 경우)
-  //   3) 액션 단위 traceId (요청 ALS)
+  // parentTraceId 우선순위:
+  //   1) 트랜잭션 ALS 의 tx traceId (동일 DB 의 tx 안인 경우)
+  //   2) 액션 단위 traceId (요청 ALS)
   const txState = txStore.getStore()?.get(args.dbName)
-  const parentTraceId =
-    args.opts.parentTraceId ?? txState?.traceId ?? reqCtx.traceId
+  const parentTraceId = txState?.traceId ?? reqCtx.traceId
 
   const ctxFields = {
     actionName: reqCtx.actionName,
