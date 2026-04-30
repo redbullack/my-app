@@ -53,6 +53,11 @@ interface TxState {
   inflight: number
   /** commit/rollback 진행 중 플래그. 이 시점 이후 신규 호출은 차단. */
   closing: boolean
+  /**
+   * 동일 DB 의 중첩 tx() 가 감지되었을 때 부모 state 에 세팅되는 플래그.
+   * 호출자가 자식 throw 를 try/catch 로 삼키더라도 commit 대신 rollback 으로 분기시키기 위함.
+   */
+  aborted: boolean
 }
 
 /** dbName → TxState. ALS 스코프별로 독립. */
@@ -243,6 +248,12 @@ export function getDb(name: string = 'MAIN'): IDbClient {
         async (traceId) => {
           const st = txStore.getStore()?.get(name)
           if (st) {
+            if (st.aborted) {
+              throw new DbError({
+                category: 'config',
+                devMessage: 'tx 스코프가 abort 상태입니다 — 중첩 트랜잭션 감지 이후 추가 호출은 허용되지 않습니다.',
+              })
+            }
             if (st.closing) {
               throw new DbError({
                 category: 'config',
@@ -273,6 +284,12 @@ export function getDb(name: string = 'MAIN'): IDbClient {
         async (traceId) => {
           const st = txStore.getStore()?.get(name)
           if (st) {
+            if (st.aborted) {
+              throw new DbError({
+                category: 'config',
+                devMessage: 'tx 스코프가 abort 상태입니다 — 중첩 트랜잭션 감지 이후 추가 호출은 허용되지 않습니다.',
+              })
+            }
             if (st.closing) {
               throw new DbError({
                 category: 'config',
@@ -304,7 +321,12 @@ export function getDb(name: string = 'MAIN'): IDbClient {
         },
         async (txTraceId) => {
           const parent = txStore.getStore()
-          if (parent?.get(name)) {
+          const parentState = parent?.get(name)
+          if (parentState) {
+            // 호출자가 자식 throw 를 try/catch 로 삼키거나 await 을 빠뜨려도
+            // 부모가 commit 으로 빠지지 않도록 부모 state 에 abort 플래그를 세팅한다.
+            // (closing 은 'commit/rollback 진행 중' 의미를 유지하기 위해 건드리지 않는다.)
+            parentState.aborted = true
             throw new DbError({
               category: 'config',
               devMessage: '동일 DB 의 중첩 트랜잭션은 지원하지 않습니다. 단일 tx 콜백 안에서 모든 query/execute 를 수행하세요.',
@@ -312,13 +334,19 @@ export function getDb(name: string = 'MAIN'): IDbClient {
           }
 
           const conn = await provider.acquireTxConnection(name, dsn, pool)
-          const state: TxState = { conn, traceId: txTraceId, inflight: 0, closing: false }
+          const state: TxState = { conn, traceId: txTraceId, inflight: 0, closing: false, aborted: false }
           // 다중 DB 트랜잭션을 위해 부모 Map 을 복사 후 동일 dbName 만 덮어쓴다.
           const next = new Map(parent ?? [])
           next.set(name, state)
 
           try {
             const result = await txStore.run(next, fn)
+            if (state.aborted) {
+              throw new DbError({
+                category: 'config',
+                devMessage: 'tx 스코프 안에서 중첩 트랜잭션이 감지되어 abort 됩니다. 부모는 rollback 됩니다.',
+              })
+            }
             if (state.inflight > 0) {
               throw new DbError({
                 category: 'config',
