@@ -19,7 +19,7 @@ import { toast } from '@/components/control/Toast'
 import {
   fetchEmpSimple,
   runTxCommit,
-  // runTxRollback,
+  runTxTest,
   type EmpSimpleRow,
   type TxTestResult,
 } from './_actions/main'
@@ -62,6 +62,21 @@ export default function Test0419Page() {
       },
     )
   }, [execute, empnoA, empnoB, delta, reload])
+
+  const handleTxTest = useCallback(() => {
+    execute(
+      runTxTest.bind(null),
+      {
+        onSuccess: (data) => {
+          toast(`data: ${data}`, { variant: 'info' })
+        },
+        onError: (err) => {
+          toast(`data: ${err.message} / ${err.devMessage} / ${err.cause}`, { variant: 'error' })
+          return 'handled'
+        }
+      }
+    )
+  }, [])
 
   // const handleRollback = useCallback(() => {
   //   execute(
@@ -145,9 +160,10 @@ export default function Test0419Page() {
             <Button variant="primary" size="sm" onClick={handleCommit}>
               Commit 테스트
             </Button>
-            {/* <Button variant="danger" size="sm" onClick={handleRollback}>
-              Rollback 테스트
-            </Button> */}
+            <Button variant="primary" size="sm" onClick={handleTxTest}>
+              tx 테스트
+            </Button>
+
           </div>
 
           <Grid

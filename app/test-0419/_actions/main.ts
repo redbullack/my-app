@@ -93,35 +93,24 @@ export const runTxCommit = async (input: TxTestInput) =>
     })
   })
 
-// export const runTxRollback = async (input: TxTestInput) =>
-//   actionAgent('runTxRollback', async (): Promise<TxTestResult> => {
-//     let beforeA: string | null = null
-//     let beforeB: string | null = null
-//     let afterA: string | null = null
-//     let afterB: string | null = null
-//
-//     try {
-//       await db.tx(async () => {
-//         beforeA = await readSal(input.empnoA)
-//         beforeB = await readSal(input.empnoB)
-//
-//         await db.execute(
-//           `UPDATE SCOTT.EMP SET SAL = SAL + :d WHERE EMPNO = :empno`,
-//           { d: input.delta, empno: Number(input.empnoA) },
-//         )
-//         await db.execute(
-//           `UPDATE SCOTT.EMP SET SAL = SAL + :d WHERE EMPNO = :empno`,
-//           { d: input.delta, empno: Number(input.empnoB) },
-//         )
-//
-//         afterA = await readSal(input.empnoA)
-//         afterB = await readSal(input.empnoB)
-//
-//         throw new Error('__forced_rollback__')
-//       })
-//     } catch (err) {
-//       if ((err as Error)?.message !== '__forced_rollback__') throw err
-//     }
-//
-//     return { committed: false, beforeA, beforeB, afterA, afterB }
-//   })
+export const runTxTest = async () =>
+  actionAgent('runTxTest', async (): Promise<number> => {
+    let insertedRows = 0
+    const testArr = ['1', '2', '3']
+
+    // tx - start
+    await db.tx(async () => {
+      await db.execute(`INSERT INTO SCOTT.TEST_TABLE(COL1, COL2, COL3) SELECT 'TEST' COL1, '4' COL2, NULL COL3 FROM DUAL`)
+      // await db.execute(`INSERT INTO SCOTT.TEST_TABLE(COL1, COL2, COL3) SELECT 'TEST' COL1, '4' COL2, NULL COL3 FROM DUAL`)
+
+      for (const v of testArr) {
+        const { rowsAffected } = await db.execute(`INSERT INTO SCOTT.TEST_TABLE(COL1, COL2, COL3) SELECT 'TEST' COL1, '${v}' COL2, NULL COL3 FROM DUAL`)
+        insertedRows += rowsAffected
+        console.log(`SERVER: runTxTest - insertedRows: ${insertedRows}`)
+      }
+    })
+    // tx - end
+
+    console.log(`SERVER: runTxTest - return insertedRows: ${insertedRows}`)
+    return insertedRows
+  })

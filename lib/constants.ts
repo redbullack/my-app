@@ -21,6 +21,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'CompSearch', href: '/comp-search', description: 'useTransition + CompGrid/CompChart' },
   { label: 'NewSearch', href: '/new-search', description: 'dataSource + ServerAction + Tab' },
   { label: 'test-0409', href: '/test-0409', description: 'Grid + Promise<T[]> + Suspense' },
+  { label: 'test-0419', href: '/test-0419', description: 'Transaction Test' },
 ]
 
 /** 샘플 블로그 데이터 */
