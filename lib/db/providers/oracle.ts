@@ -285,6 +285,19 @@ async function oracleRelease(conn: unknown): Promise<void> {
   }
 }
 
+/**
+ * 풀로 반납하지 않고 conn 을 영구 폐기한다.
+ * oracledb 는 close 옵션의 `drop: true` 로 풀에서 빼낸 뒤 닫는다.
+ * tx 안전망(await 누락/aborted)이 발동된 경우만 호출된다.
+ */
+async function oracleDestroy(conn: unknown): Promise<void> {
+  try {
+    await (conn as oracledb.Connection).close({ drop: true })
+  } catch {
+    /* noop */
+  }
+}
+
 async function oracleWarmup(
   dbName: string,
   dsn: ResolvedDsn,
@@ -329,6 +342,7 @@ export const oracleProvider: IDbProvider = {
   commit: oracleCommit,
   rollback: oracleRollback,
   release: oracleRelease,
+  destroy: oracleDestroy,
   warmup: oracleWarmup,
   closePool: oracleClosePool,
   closeAll: oracleCloseAll,

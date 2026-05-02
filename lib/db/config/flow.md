@@ -1,3 +1,50 @@
+# 트랜잭션 안전망 참고 자료
+
+## TxState 속성 역할 정리
+
+`lib/db/factory.ts` 의 `TxState` 인터페이스가 보유한 각 속성의 책임:
+
+| 속성 | 역할 | 사용 지점 |
+|---|---|---|
+| `dbName` | 이 tx 가 속한 DB 식별자. 다른 DB 호출 차단(`st.dbName !== name`) 의 비교 키 | query/execute 진입부 |
+| `conn` | provider 가 풀에서 빌려준 raw 커넥션. ALS 를 통해 query/execute 가 같은 conn 위에서 실행되도록 전달되고, commit/rollback/release/destroy 의 인자로 사용 | query/execute, finalize 단계 |
+| `traceId` | tx 단위 trace ID. 하위 query/execute 로그의 `parentTraceId` 로 연결되어 한 트랜잭션의 호출들을 묶음 | `withLifecycle` |
+| `inflight` | 진행 중 query/execute promise 집합. tx 종료 시점에 비어있지 않으면 await 누락 → dirty. unhandled rejection 방지를 위해 noop catch 부착 대상도 됨 | query/execute add/delete, tx 종료 시 검사 |
+| `closing` | commit/rollback 이 시작된 이후를 표시. 이 시점 이후 ALS 캡처로 늦게 도달한 호출을 차단 (예: setTimeout 으로 commit 이후에 도달하는 query) | query/execute 의 가드 |
+| `aborted` | 중첩 tx / 교차 DB 호출이 감지되었음. 호출자가 throw 를 try/catch 로 삼키더라도 commit 분기를 rollback 분기로 강제 전환 | 부모 state 에 set, tx 종료 시 검사 |
+
+핵심 분류:
+- **conn / traceId** — 정체성 · 리소스
+- **inflight** — 생명주기 추적 (await 누락 검출 + unhandled rejection 차단)
+- **closing / aborted** — 게이트 플래그. 둘 다 "신규 호출 차단" 효과를 가지지만 의미 축이 다름:
+  - `closing` = "이미 닫고 있음" (물리 단계)
+  - `aborted` = "결과는 rollback 으로" (논리 분기)
+
+---
+
+## 드라이버별 conn 폐기 가능성
+
+tx 안전망 발동 시 사용하는 `provider.destroy(conn)` (풀에 반납하지 않고 폐기) 의 드라이버별 구현 난이도. cancel(진행 중 statement 인터럽트) 은 현재 구현 범위 밖이지만 참고용으로 함께 기재.
+
+| Driver | 풀 미반납 폐기 | Cancel (진행 중 인터럽트) | 까다로움 |
+|---|---|---|---|
+| **oracledb** | `connection.close({ drop: true })` | `connection.break()` | ★ 쉬움 — 공식 API 둘 다 깔끔 |
+| **pg** (postgres) | `pool.release(client, true)` 또는 `client.release(err)` 에 truthy 전달 시 풀에서 제거 | 별도 cancel connection 필요 (pg_cancel_backend) | ★★ 보통 — 풀 API 가 둘째 인자로 처리 |
+| **mysql2** | `connection.destroy()` (즉시 소켓 끊기) | `KILL QUERY <id>` 별도 conn 으로 | ★ 쉬움 — destroy 가 명시적 |
+| **mariadb** | `connection.destroy()` | mysql2 와 동일 | ★ 쉬움 |
+| **mssql** (tedious) | 표준 `pool.release` 에 destroy 플래그 없음. `connection.close()` 후 풀에서 수동 제거 | `request.cancel()` (per-statement) | ★★★ 까다로움 — 풀 wrapper 의존, 드라이버마다 동작 다름 |
+| **DB2** (ibm_db) | `Pool.close(conn, cb)` 가 conn 닫고 풀에서 제거. 단 pool 구현이 다양 | CLI 레벨 `SQLCancel` 존재하나 node binding 노출 제한적 | ★★★ 까다로움 — 풀 구현 통일 안 됨, callback 기반 API |
+| **node-odbc** | `connection.close()` 만 제공. 풀은 보통 사용자 측에서 구현 (또는 `odbc.pool()` 의 `close()`). 풀 wrapper 가 직접 제어 | `SQLCancel` 은 ODBC API 에 있으나 node-odbc 가 거의 노출 안 함 | ★★★★ 매우 까다로움 — 풀 동작이 라이브러리/버전마다 갈림 |
+
+핵심 인사이트:
+- **oracle / mysql2 / mariadb** — 공식 API 한 줄로 끝
+- **pg** — `release(client, true)` 패턴이 잘 정착되어 있음
+- **mssql / db2 / odbc** — 풀 구현이 통일되어 있지 않아, "정말로 풀에서 빠지는지" 를 어댑터 레벨에서 검증해야 함. 최악의 경우 풀 자체를 자체 구현으로 감싸야 destroy 가 보장됨
+
+이번 추상화는 `IDbProvider.destroy(conn)` 후크 한 개로 격리하므로, 드라이버별 차이는 어댑터 안에 갇히고 호출부는 무관하다.
+
+---
+
 # DB 설계 Q&A
 
 ## Q1. `getDb()`를 Class가 아닌 Interface(`IDbClient`) 형태로 사용하는 이유

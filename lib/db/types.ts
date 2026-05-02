@@ -153,6 +153,14 @@ export interface IDbProvider {
   release(conn: unknown): Promise<void>
 
   /**
+   * 커넥션을 풀로 반납하지 않고 폐기한다.
+   * tx 안전망(in-flight 누락 / aborted)이 발동된 경우 사용한다 — 진행 중이던 driver
+   * 호출이 다음 사용자의 conn 을 오염시키는 race 를 구조적으로 차단하기 위함.
+   * 풀은 새 conn 을 만들어 자리를 채운다. 실패는 호출부가 무시한다.
+   */
+  destroy(conn: unknown): Promise<void>
+
+  /**
    * 풀을 선제적으로 생성·초기화한다. 이미 생성된 풀이 있으면 no-op.
    * 서버 부팅 시점의 워밍업 용도로 호출된다.
    */
