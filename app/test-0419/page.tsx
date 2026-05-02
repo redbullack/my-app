@@ -76,7 +76,7 @@ export default function Test0419Page() {
         }
       }
     )
-  }, [])
+  }, [execute])
 
   // const handleRollback = useCallback(() => {
   //   execute(

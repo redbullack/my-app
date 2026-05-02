@@ -70,6 +70,7 @@ $RECYCLE.BIN/
 # Claude Code
 .claude/cache/
 .claude/tmp/
+.mcp.json
 
 # pnpm
 .pnpm-store/

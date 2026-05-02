@@ -14,12 +14,13 @@ import { randomUUID } from 'node:crypto'
 
 export type DbErrorCategory =
   | 'config'      // 레지스트리/암호키 등 설정 문제
-  | 'connection' // 네트워크/리스너/호스트 등 접속 실패
-  | 'timeout'    // 쿼리 타임아웃
-  | 'syntax'     // SQL 구문/객체 미존재
-  | 'constraint' // PK/UNIQUE/FK/CHECK 위반
-  | 'permission' // 권한/인증 실패
-  | 'unknown'    // 분류 불가
+  | 'connection'  // 네트워크/리스너/호스트 등 접속 실패
+  | 'timeout'     // 쿼리 타임아웃
+  | 'syntax'      // SQL 구문/객체 미존재
+  | 'constraint'  // PK/UNIQUE/FK/CHECK 위반
+  | 'permission'  // 권한/인증 실패
+  | 'transaction' // tx 사용 규약 위반 (중첩 tx, 교차 DB 호출, abort/closing 이후 호출, await 누락 등)
+  | 'unknown'     // 분류 불가
 
 /** 클라이언트에 노출될 단일 안전 문구. */
 export const SAFE_PUBLIC_MESSAGE = '데이터베이스 처리 중 오류가 발생했습니다.'
