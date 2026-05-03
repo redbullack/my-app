@@ -28,6 +28,7 @@ export type ErrorType =
     | 'db_constraint'
     | 'db_permission'
     | 'db_system'
+    | 'busy'
     | 'unknown'
 
 /** Server Action 직렬화 경계용 plain object 타입 */
