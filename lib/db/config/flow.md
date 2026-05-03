@@ -409,3 +409,105 @@ dataSource: (keyword: string) => Promise<ActionResponse<Option[]>>
 // X — useAction이 envelope을 언래핑할 수 없음
 dataSource: (keyword: string) => Promise<Option[]>
 ```
+
+---
+
+## actionWrapper = "컨트롤러" 멘탈 모델
+
+### 한 줄 요약
+
+[lib/utils/server/actionWrapper.ts](../../utils/server/actionWrapper.ts) 의 `actionAgent` 는 Spring `@Controller` / ASP.NET `Controller` 와 같은 **요청 진입점의 횡단 관심사 처리기** 역할을 한다. 비즈니스 로직(=`fn`)은 본인 일만 하고, 그 주변의 모든 공통 처리(인증 컨텍스트 주입 · 동시 실행 제한 · 에러 분류 · 응답 포맷 통일 · 로깅)는 래퍼가 책임진다.
+
+### 전통적 MVC 컨트롤러와의 대응
+
+| MVC 컨트롤러가 하는 일 | actionAgent 에서 대응되는 부분 |
+|---|---|
+| 요청 진입 시 인증 컨텍스트(SecurityContext) 세팅 | `buildRequestContext` — `auth()` 로 세션 읽고 ALS 에 주입 |
+| Request-scoped 정보(헤더, traceId) 보관 | `runWithRequestContext` — ALS 로 traceId/userId/pagePath 흐름 |
+| Rate limit / Throttling 인터셉터 | `acquireUserSlot` — 유저 단위 동시 실행 게이트 |
+| try/catch 없이 비즈니스 코드를 깔끔하게 | `fn()` 호출부 — Server Action 본문은 정상 경로만 작성 |
+| `@ExceptionHandler` / `ProblemDetails` 변환 | `toActionError` — DbError/ActionBusyError/Unknown 을 ActionError 로 분기 |
+| 응답 포맷 통일(Result envelope) | `ActionResponse<T>` = `{ isSuccess, data }` 또는 `{ isSuccess, error }` |
+| 액세스 로그 / 에러 로그 | `server.action` 이벤트 1회 로깅 (DbError 는 withLifecycle 에서 이미 로깅) |
+| 리소스 정리 (finally) | `release?.()` — 동시 실행 슬롯 반납 |
+
+핵심: **팀원이 Server Action 안에서 try/catch 를 쓰지 않아도 되는 이유** = 컨트롤러 레이어가 모든 횡단 관심사를 가져갔기 때문.
+
+### 요청 1건이 actionAgent 를 통과하는 흐름
+
+```
+[Client]  startTransition(() => myServerAction(args))
+   │
+   ▼
+[Server Action 진입]
+   │
+   ▼
+actionAgent(name, fn)
+   │
+   ├─ ① buildRequestContext(name)            ─── "요청 메타 수집" 단계
+   │     ├─ traceId = randomUUID()           (요청 단위 1개)
+   │     ├─ auth()      → userId/userName/role/empno
+   │     └─ headers()   → pagePath(referer)
+   │
+   ├─ ② runWithRequestContext(ctx, …)        ─── "ALS 컨텍스트 주입" 단계
+   │     · 이후 모든 하위 호출(withLifecycle, 로거)이
+   │       파라미터 없이 동일 ctx 를 읽음
+   │
+   ├─ ③ acquireUserSlot(userId)              ─── "Throttle/Rate-limit" 단계
+   │     ├─ 슬롯 확보 성공 → release 콜백 보관
+   │     └─ 한도 초과/큐 타임아웃 → ActionBusyError throw
+   │                              → toActionError 가 type:'busy' 로 직렬화
+   │
+   ├─ ④ try { data = await fn() }            ─── "비즈니스 로직 실행" 단계
+   │     · fn 안에서 던진 모든 예외는 여기서 잡힘
+   │     · fn 내부에 try/catch 금지 (래퍼가 담당)
+   │
+   ├─ ⑤ catch (err) → toActionError(err)     ─── "에러 분류 / 직렬화" 단계
+   │     ├─ ActionBusyError → type:'busy'
+   │     ├─ DbError         → DB_CATEGORY_MAP 으로 분기
+   │     │                   (constraint/permission/db_system)
+   │     │                   ※ withLifecycle 이 이미 로깅했으므로 재로깅 X
+   │     └─ 그 외 Error     → type:'unknown' + server.action 1회 로깅
+   │                         (traceId 는 ALS 의 액션 traceId 재사용)
+   │
+   ├─ ⑥ finally { release?.() }              ─── "리소스 회수" 단계
+   │     · 성공/실패 상관없이 동시 실행 슬롯 해제
+   │
+   ▼
+[응답 직렬화]
+   ActionResponse<T> envelope (plain object)
+      성공: { isSuccess: true,  data }
+      실패: { isSuccess: false, error: ActionError }
+   │
+   ▼
+[Client useAction]
+   error → new AppError(error) 복원 → globalErrorHandler → toast
+```
+
+### 왜 이 구조가 좋은가 (팀원 관점)
+
+1. **비즈니스 코드의 시그니처가 단순해진다**
+   - Server Action 작성자는 `async () => 결과` 만 쓰면 된다. 인증 객체, 트랜잭션 ID, 에러 변환 코드를 함수 인자로 들고 다닐 필요가 없다.
+
+2. **에러 처리 규칙이 1곳에 집중된다**
+   - 새로운 에러 타입을 추가하고 싶다면 `toActionError` 의 분기만 수정하면 전 프로젝트에 일괄 적용된다 (예: `AuthError`, `ZodError` 자리 이미 주석으로 마련됨, [actionWrapper.ts:145-163](../../utils/server/actionWrapper.ts#L145-L163)).
+
+3. **traceId 가 자동으로 묶인다**
+   - `buildRequestContext` 에서 발급한 traceId 1개가 ALS 를 타고 흘러 DB 로그(`parentTraceId`) → 액션 에러 로그 → 클라이언트 토스트까지 동일 ID 로 매칭된다. 장애 분석 시 traceId 하나로 요청 1건의 모든 흔적을 추적할 수 있다.
+
+4. **응답 포맷이 강제된다**
+   - 모든 Server Action 의 반환 타입이 `ActionResponse<T>` 로 통일되므로, 클라이언트의 `useAction` 훅이 일관되게 언래핑할 수 있다. "어떤 액션은 throw, 어떤 액션은 null 반환" 같은 들쭉날쭉함이 원천 차단된다.
+
+5. **Rate-limit · 동시성 제어가 액션 레벨에서 일괄 적용**
+   - 새 액션을 만들어도 자동으로 유저 단위 동시 실행 게이트가 적용된다. 개별 액션이 신경 쓸 일이 아니다.
+
+### 책임 경계 정리
+
+| 레이어 | 책임 | 하지 말아야 할 일 |
+|---|---|---|
+| **Server Action 본문 (`fn`)** | 비즈니스 로직 · DB 호출 · 정상 경로 작성 | try/catch, 에러 메시지 가공, 응답 포맷 조립 |
+| **actionAgent (컨트롤러)** | 컨텍스트 주입 · 동시성 게이트 · 에러 분류 · envelope 직렬화 · 로깅 | 비즈니스 로직 분기, 도메인 검증 |
+| **withLifecycle (DB 게이트웨이)** | DB 호출 lifecycle · DbError 변환 · db.ok/db.err 로깅 | 액션 단위 traceId 발급, 세션 조회 |
+| **useAction (클라이언트 훅)** | envelope 언래핑 · AppError 복원 · 토스트 위임 | 에러 메시지 자체 가공 |
+
+→ **각 레이어는 자기 책임만 갖고, 위/아래 레이어의 책임을 침범하지 않는다.** 이게 actionAgent 를 "컨트롤러"로 부를 수 있는 이유이다.
