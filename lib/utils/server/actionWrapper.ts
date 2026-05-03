@@ -25,6 +25,7 @@ import { auth } from '@/lib/auth/auth'
 import { DbError, type DbErrorCategory } from '@/lib/db'
 import type { ActionResponse, ActionError, ErrorType } from '../type'
 import { runWithRequestContext, getRequestContext, type RequestContext } from './requestContext'
+import { acquireUserSlot, ActionBusyError } from './userConcurrency'
 
 /** DbError.category → ActionError.type */
 const DB_CATEGORY_MAP: Record<DbErrorCategory, ErrorType> = {
@@ -34,6 +35,7 @@ const DB_CATEGORY_MAP: Record<DbErrorCategory, ErrorType> = {
     connection: 'db_system',
     syntax: 'db_system',
     timeout: 'db_system',
+    transaction: 'db_system',
     unknown: 'db_system',
 }
 
@@ -53,11 +55,23 @@ export async function actionAgent<T>(
     const ctx = await buildRequestContext(name)
 
     return runWithRequestContext(ctx, async () => {
+        // 유저 단위 동시 실행 게이트 — 비로그인은 게이트 적용 제외.
+        // 한도 초과 + 큐 타임아웃/풀 시 ActionBusyError 가 throw 되어
+        // toActionError 에서 type:'busy' 로 직렬화된다.
+        let release: (() => void) | undefined
+        try {
+            if (ctx.userId) release = await acquireUserSlot(ctx.userId)
+        } catch (err) {
+            return { isSuccess: false, error: toActionError(err, name) }
+        }
+
         try {
             const data = await fn()
             return { isSuccess: true, data }
         } catch (err) {
             return { isSuccess: false, error: toActionError(err, name) }
+        } finally {
+            release?.()
         }
     })
 }
@@ -97,6 +111,25 @@ async function buildRequestContext(actionName: string): Promise<RequestContext> 
 }
 
 function toActionError(err: unknown, actionName: string): ActionError {
+    // ── 0) 동시 실행 게이트 초과 ──
+    // 호출자(유저)에게 토스트로 알리고 잠시 후 재시도 유도. DB 까지 가지 않으므로
+    // traceId 는 ALS 의 액션 traceId 를 그대로 사용.
+    if (err instanceof ActionBusyError) {
+        const ctx = getRequestContext()
+        return {
+            type: 'busy',
+            message:
+                err.reason === 'queue_timeout'
+                    ? '요청이 많아 처리하지 못했습니다. 잠시 후 다시 시도해주세요.'
+                    : '동시에 너무 많은 요청이 진행 중입니다. 잠시 후 다시 시도해주세요.',
+            traceId: ctx.traceId ?? randomUUID(),
+            devMessage:
+                process.env.NODE_ENV === 'development'
+                    ? `${actionName}: ${err.reason}`
+                    : undefined,
+        }
+    }
+
     // ── 1) DB 에러 ──
     if (err instanceof DbError) {
         return {

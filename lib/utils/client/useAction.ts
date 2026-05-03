@@ -34,37 +34,39 @@ export function useAction() {
     const [, setBoundaryError] = useState<unknown>(null)
 
     const execute = useCallback(
-        async <T>(
+        <T>(
             factory: () => Promise<ActionResponse<T>>,
             opts: ExecuteOptions<T> = {},
-        ): Promise<void> => {
-            setIsLoading(true)
-            try {
-                const result = await factory()
-                if (result.isSuccess) {
-                    opts.onSuccess?.(result.data)
-                    return
+        ): void => {
+            ;(async () => {
+                setIsLoading(true)
+                try {
+                    const result = await factory()
+                    if (result.isSuccess) {
+                        opts.onSuccess?.(result.data)
+                        return
+                    }
+                    const appError = new AppError(result.error)
+                    const handled = opts.onError?.(appError)
+                    if (handled === 'handled' || opts.silent) return
+                    if (opts.throwToBoundary) {
+                        setBoundaryError(() => { throw appError })
+                        return
+                    }
+                    handleGlobalError(appError)
+                } catch (err: unknown) {
+                    if (opts.silent) return
+                    if (opts.throwToBoundary) {
+                        setBoundaryError(() => { throw err })
+                        return
+                    }
+                    handleGlobalError(
+                        err instanceof Error ? err : new Error('알 수 없는 오류'),
+                    )
+                } finally {
+                    setIsLoading(false)
                 }
-                const appError = new AppError(result.error)
-                const handled = opts.onError?.(appError)
-                if (handled === 'handled' || opts.silent) return
-                if (opts.throwToBoundary) {
-                    setBoundaryError(() => { throw appError })
-                    return
-                }
-                handleGlobalError(appError)
-            } catch (err: unknown) {
-                if (opts.silent) return
-                if (opts.throwToBoundary) {
-                    setBoundaryError(() => { throw err })
-                    return
-                }
-                handleGlobalError(
-                    err instanceof Error ? err : new Error('알 수 없는 오류'),
-                )
-            } finally {
-                setIsLoading(false)
-            }
+            })()
         },
         [],
     )

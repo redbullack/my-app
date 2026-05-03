@@ -100,14 +100,15 @@ export const runTxTest = async () =>
 
     // tx - start
     await db.tx(async () => {
-      await db.execute(`INSERT INTO SCOTT.TEST_TABLE(COL1, COL2, COL3) SELECT 'TEST' COL1, '4' COL2, NULL COL3 FROM DUAL`)
-      // await db.execute(`INSERT INTO SCOTT.TEST_TABLE(COL1, COL2, COL3) SELECT 'TEST' COL1, '4' COL2, NULL COL3 FROM DUAL`)
+      await db.execute(`INSERT INTO SCOTT.TEST_TABLE(COL1, COL2, COL3) SELECT 'TEST' COL1, '0' COL2, NULL COL3 FROM DUAL`)
 
       for (const v of testArr) {
         const { rowsAffected } = await db.execute(`INSERT INTO SCOTT.TEST_TABLE(COL1, COL2, COL3) SELECT 'TEST' COL1, '${v}' COL2, NULL COL3 FROM DUAL`)
         insertedRows += rowsAffected
         console.log(`SERVER: runTxTest - insertedRows: ${insertedRows}`)
       }
+
+      await db.execute(`INSERT INTO SCOTT.TEST_TABLE(COL1, COL2, COL3) SELECT 'TEST' COL1, '4' COL2, NULL COL3 FROM DUAL`)
     })
     // tx - end
 
