@@ -78,6 +78,13 @@ const txStore = new AsyncLocalStorage<TxState>()
 const clientCache = new Map<string, IDbClient>()
 
 /**
+ * lifecycle 에서 이미 로깅한 DbError 추적용.
+ * Error 인스턴스에 직접 속성을 박아넣지 않기 위해 WeakSet 으로 분리.
+ * GC 시 자동 해제되므로 누수 우려 없음.
+ */
+const loggedErrors = new WeakSet<DbError>()
+
+/**
  * DB 이름 화이트리스트.
  * 환경변수 키(`DB_CONNECTION__<NAME>`) 의 일부로 그대로 합성되므로,
  * 외부 입력이 흘러들어와 임의 환경변수를 prove 하는 표면을 만들지 않도록
@@ -129,12 +136,15 @@ async function withLifecycle<R>(
   // 스코프 바깥에서 호출되는 경우(예: warmup) 빈 객체로 안전하게 동작.
   const reqCtx = getRequestContext()
 
-  // parentTraceId 우선순위:
-  //   1) 트랜잭션 ALS 의 tx traceId (동일 DB 의 tx 안인 경우)
-  //   2) 액션 단위 traceId (요청 ALS)
+  // 3-tier traceId 모델 (OpenTelemetry 의 trace_id/parent_span_id/span_id 와 유사):
+  //   - traceId        : 본 호출 자체의 식별자 (query/execute/tx 각각 새로 발급)
+  //   - parentTraceId  : 직속 부모 — tx 안에서 실행된 query/execute 의 경우에만 tx traceId.
+  //                       tx-op 자체나 tx 밖 호출은 undefined.
+  //   - actionTraceId  : 요청(액션) 루트 식별자. 액션 전체 이력을 한 방에 묶는 용도.
   const st = txStore.getStore()
   const txState = st && st.dbName === args.dbName ? st : undefined
-  const parentTraceId = txState?.traceId ?? reqCtx.traceId
+  const parentTraceId = txState?.traceId
+  const actionTraceId = reqCtx.traceId
 
   const ctxFields = {
     actionName: reqCtx.actionName,
@@ -156,6 +166,7 @@ async function withLifecycle<R>(
       op: args.op,
       traceId,
       parentTraceId,
+      actionTraceId,
       durationMs,
       sql: args.sql,
       binds: args.binds,
@@ -165,9 +176,8 @@ async function withLifecycle<R>(
     return result
   } catch (err) {
     const durationMs = Date.now() - start
-    const alreadyLogged =
-      err instanceof DbError &&
-      (err as DbError & { __loggedByLifecycle?: boolean }).__loggedByLifecycle === true
+    const alreadyLogged = err instanceof DbError && loggedErrors.has(err)
+    console.log(`SERVER: factory.ts - alreadyLogged: ${alreadyLogged}`)
 
     if (err instanceof DbError) {
       if (!alreadyLogged && loggable) {
@@ -177,6 +187,7 @@ async function withLifecycle<R>(
           op: args.op,
           traceId,
           parentTraceId,
+          actionTraceId,
           durationMs,
           sql: args.sql,
           binds: args.binds,
@@ -186,7 +197,8 @@ async function withLifecycle<R>(
           cause: err.cause instanceof Error ? err.cause.message : String(err.cause ?? ''),
           ...ctxFields,
         })
-          ; (err as DbError & { __loggedByLifecycle?: boolean }).__loggedByLifecycle = true
+        loggedErrors.add(err)
+        console.log(`SERVER: factory.ts - loggedErrors.add(err): ${loggedErrors}`)
       } else if (args.op === 'transaction' && loggable) {
         // 하위 쿼리에서 이미 로깅되었더라도, 트랜잭션 단위 실패 집계를 위해 요약 1줄 추가.
         log.error('db.err', {
@@ -195,6 +207,7 @@ async function withLifecycle<R>(
           op: 'transaction',
           traceId,
           parentTraceId,
+          actionTraceId,
           durationMs,
           sql: args.sql,
           category: err.category,
@@ -219,6 +232,7 @@ async function withLifecycle<R>(
         op: args.op,
         traceId,
         parentTraceId,
+        actionTraceId,
         durationMs,
         sql: args.sql,
         binds: args.binds,
@@ -226,7 +240,8 @@ async function withLifecycle<R>(
         cause: err instanceof Error ? err.message : String(err),
         ...ctxFields,
       })
-        ; (wrapped as DbError & { __loggedByLifecycle?: boolean }).__loggedByLifecycle = true
+      loggedErrors.add(wrapped)
+      console.log(`SERVER: factory.ts - loggedErrors.add(wrapped): ${loggedErrors}`)
     }
     throw wrapped
   }
@@ -460,16 +475,13 @@ export async function warmupDb(name: string): Promise<void> {
 }
 
 // ─── 프로세스 종료 훅 ──────────────────────────────────────────────
+// HMR / 다중 import 환경에서 핸들러가 중복 등록되지 않도록 globalThis 플래그로 가드.
 const HOOK_FLAG = '__myapp_db_exit_hook__'
-{
-  const g = globalThis as unknown as Record<string, boolean | undefined>
-  if (!g[HOOK_FLAG]) {
-    g[HOOK_FLAG] = true
-    const close = () => {
-      void closeAllProviders()
-    }
-    process.once('beforeExit', close)
-    process.once('SIGINT', close)
-    process.once('SIGTERM', close)
-  }
+const globalFlags = globalThis as unknown as Record<string, boolean | undefined>
+if (!globalFlags[HOOK_FLAG]) {
+  globalFlags[HOOK_FLAG] = true
+  const close = () => { void closeAllProviders() }
+  process.once('beforeExit', close)
+  process.once('SIGINT', close)
+  process.once('SIGTERM', close)
 }
