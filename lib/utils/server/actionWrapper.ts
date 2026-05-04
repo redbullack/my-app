@@ -163,9 +163,10 @@ function toActionError(err: unknown, actionName: string): ActionError {
     // }
 
     // ── 6) 미분류 에러 → unknown fallback ──
-    // traceId 통합: 같은 요청의 DB 로그/액션 로그가 동일 traceId 로 묶이도록 ALS 값을 재사용.
+    // traceId 통합: 같은 요청의 DB 로그/액션 로그를 actionTraceId 로 묶기 위해 ALS 값을 재사용.
+    // (정상 경로에선 ctx.traceId 가 항상 존재. fallback randomUUID 는 ALS 가 비어있는 비정상 경로 대비.)
     const ctx = getRequestContext()
-    const traceId = ctx.traceId ?? randomUUID()
+    const actionTraceId = ctx.traceId ?? randomUUID()
     const message = err instanceof Error ? err.message : String(err)
     console.error(
         JSON.stringify({
@@ -174,7 +175,7 @@ function toActionError(err: unknown, actionName: string): ActionError {
             scope: 'server.action',
             event: 'action.error',
             action: actionName,
-            traceId,
+            actionTraceId,
             userId: ctx.userId,
             userName: ctx.userName,
             role: ctx.role,
@@ -192,7 +193,7 @@ function toActionError(err: unknown, actionName: string): ActionError {
     return {
         type: 'unknown',
         message: '요청 처리 중 오류가 발생했습니다.',
-        traceId,
+        traceId: actionTraceId,
         devMessage: process.env.NODE_ENV === 'development' ? message : undefined,
     }
 }
