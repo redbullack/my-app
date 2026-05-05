@@ -1,3 +1,80 @@
+# DB 로그 테이블 INSERT 전환 가이드
+
+`lib/db/logger.ts` 의 `ConsoleDbLogger` 를 운영용 `OracleDbLogger` (DB 테이블 INSERT 구현체) 로 교체할 때 반드시 검토해야 할 설계 포인트를 정리한다. `lib/db/factory.ts` 의 `withLifecycle` 이 페이로드를 만드는 단일 지점이므로, 이 흐름을 이해하지 못한 채 구현체만 갈아끼우면 무한 재귀 / 로그 손실 / 시점 왜곡 / 보안 사고가 발생한다.
+
+## 1. 운영 INSERT 구현 시 주의점
+
+### 1-1. 무한 재귀 차단 (최우선)
+
+`OracleDbLogger.#insert` 가 `getDb('LOG').execute(...)` 로 INSERT 하면 → 그 INSERT 가 다시 `withLifecycle` 에 감싸져 → 다시 `log.info('db.ok', ...)` → 무한 루프. 따라서:
+
+- **logger 구현체는 절대 `getDb()` / `withLifecycle` 을 경유하지 않는다.** `provider` 를 직접 호출하거나 `node-oracledb` 를 raw 로 사용한다 ([logger.ts:52](../logger.ts#L52)).
+- **logger 전용 풀** 을 별도 초기화하여 비즈니스 풀과 분리한다 (풀 고갈 격리, 동시 실행 격리).
+
+`reqCtx.loggable` 가드만으로도 현재 코드 한정으로는 재귀가 안 일어나지만 (logger 가 `runWithRequestContext` 외부에서 INSERT → `loggable !== true` → `log.*` 미호출), 이는 **단일 invariant 의존**이라 깨지기 쉽다. 누군가 `loggable` 기본값을 true 로 바꾸거나 logger 내부에서 실수로 `actionAgent` 로 들어가는 호출을 만들면 즉시 무한 재귀가 살아난다. 방어 깊이를 위해 logger 자체에도 `inLogger` ALS 가드를 두는 것을 권장.
+
+### 1-2. 동기 인터페이스 위에 비동기 INSERT 를 얹을 때
+
+`DbLogger.info/warn/error` 는 동기 시그니처 ([logger.ts:11-13](../logger.ts#L11-L13)) 인데 INSERT 는 비동기다. `void this.#insert(...)` 의 fire-and-forget 방식은:
+
+- **로그 손실**: SIGTERM/crash 시 in-flight INSERT 가 사라진다. `factory.ts` 의 `beforeExit` 훅도 logger flush 를 보장하지 않으므로 `flush(): Promise<void>` 메서드를 추가하고 종료 훅에서 await 해야 한다.
+- **순서 역전**: 동시 INSERT 가 풀에서 경쟁하면 실제 발생 순서와 INSERT 순서가 어긋날 수 있다 (`SYSDATE` 가 같은 초로 찍힘). → 시각은 호출 시점에 미리 계산해서 바인드 (§2 의 `startedAt` / `endedAt` 패턴).
+- **백프레셔 부재**: 트래픽 폭주 시 큐 무한 증가. 인메모리 큐 + 배치 INSERT (예: 100건/100ms) + drop policy (info 부터 폐기, error 보존) 가 필요.
+
+### 1-3. 실패 격리
+
+logger INSERT 실패가 비즈니스 요청을 블로킹하면 안 된다. 회로차단기로 1차 차단, 폴백으로 ConsoleDbLogger 자동 전환 또는 로컬 파일 append (degraded mode). 재시도 루프가 비즈니스 latency 에 누수되지 않도록 background queue 안에서만 재시도.
+
+### 1-4. 민감정보
+
+콘솔 시절엔 운영자만 봤지만 **테이블에 영구 저장되는 순간 보안 등급이 바뀐다**.
+
+- `binds` 에 비밀번호/주민번호/카드번호가 섞일 수 있음 → `bindShape()` ([logger.ts:133](../logger.ts#L133)) 로 키만 저장, 또는 마스킹 정책 적용.
+- 풀 SQL 저장은 쿼리 패턴 노출 → `sqlPreview()` ([logger.ts:124](../logger.ts#L124)) 로 80자 컷팅된 버전만 저장.
+- 보존 기간(retention) + 파티셔닝 설계 필수. 고트래픽이면 하루 수천만 건이 쌓인다.
+
+### 1-5. 컬럼 스키마 — 하이브리드 권장
+
+`factory.ts` 가 보내는 필드는 시간이 지나며 늘어난다 (`actionTraceId`, `parentTraceId`, `startedAt`, `endedAt`, `actionName`, `pagePath`, `role` …). 모든 필드를 컬럼으로 풀면 ALTER TABLE 부담이 크다. **인덱싱 핵심 필드** (traceId, actionTraceId, dbName, op, status, startedAt) 만 컬럼으로, **나머지는 CLOB JSON 한 칸**에 통째로 저장하는 하이브리드 스키마가 현실적이다.
+
+### 1-6. 트랜잭션 의미 — 별도 conn + autoCommit
+
+INSERT 는 반드시 **별도 conn + `autoCommit: true`**.
+
+- Oracle 의 트랜잭션 경계는 conn 단위이므로 logger conn 과 비즈니스 tx conn 은 완전히 독립.
+- 비즈니스 rollback 이 로그까지 지우는 사고 차단, logger 실패가 비즈니스 tx 에 영향 없음.
+- **단**, 진짜 독립이려면 ① logger 전용 풀 사용 ② `txStore` 의 conn 절대 미참조 ③ `autoCommit` 은 execute 옵션으로 명시 ④ INSERT 직후 `close()` 로 풀 반납 — 이 4가지가 동시에 성립해야 한다.
+
+## 2. 로그 시점 왜곡 방지 — `startedAt` / `endedAt` 분리 로깅
+
+비동기 INSERT 환경에서는 INSERT 시점의 `SYSDATE` 가 큐 지연만큼 뒤로 밀려 찍힌다. 즉 **DB 가 보는 시각 ≠ 실제 쿼리 종료 시각**. 해결책은 호출 시점에 시각을 미리 계산해서 페이로드에 박는 것.
+
+### 2-1. 적용된 변경
+
+- [factory.ts](../factory.ts) `withLifecycle` 의 모든 `log.info('db.ok', ...)` / `log.error('db.err', ...)` 페이로드에 `startedAt`, `endedAt` (ISO 문자열) 추가. `durationMs` 는 편의용으로 유지.
+- [logger.ts](../logger.ts) `ConsoleDbLogger.write` 가 자동으로 박던 `ts` 키를 `loggedAt` 으로 변경 — "로그 emit 시각" 과 "쿼리 실행 시각(`startedAt`/`endedAt`)" 을 의미상 분리.
+
+### 2-2. OracleDbLogger 적용 가이드
+
+- 로그 테이블 컬럼: `CREATED_AT` (= INSERT 시점, SYSDATE) 대신 `STARTED_AT` / `ENDED_AT` 컬럼을 두고 `:startedAt` / `:endedAt` 바인드.
+- 필요하면 `LOGGED_AT` 컬럼을 추가로 두어 enqueue 지연 모니터링.
+- 이 구조에서 INSERT 가 5초 늦게 처리돼도 테이블은 정확한 쿼리 시작·종료 시각을 보존한다.
+
+## 3. logger.ts 의 다른 프레임워크 재사용성
+
+`DbLogger` 인터페이스 ([logger.ts:10-14](../logger.ts#L10-L14)) 는 `event: string, fields: Record<string, unknown>` 의 완전 일반형이라 DB 와 무관하게 재사용 가능. 단 그대로 옮기기보다 다음 4가지를 다듬으면 범용 로깅 추상화로 격상된다.
+
+| 항목 | 현재 | 개선 방향 |
+|---|---|---|
+| 네이밍 | `DbLogger`, `getDbLogger`, `scope: 'db'` 가 박힘 | `ScopedLogger` 같은 일반명 + `scope` 를 생성자 인자로 |
+| flush | `Promise` 미반환 → graceful shutdown 보장 안 됨 | `flush(): Promise<void>` 추가, 종료 훅에서 await |
+| 레벨 | `info/warn/error` 3개 고정 | `debug`, `trace`, `fatal` 추가 + `LOG_LEVEL` 필터링 |
+| 에러 객체 | `error(event, fields)` 만 — 호출자가 stack 평탄화 ([factory.ts:197](../factory.ts#L197)) | `error(event, err: Error, fields)` 로 stack 1급 보존 |
+
+반대로 `factory.ts` 의 `withLifecycle` 패턴(3-tier traceId, ALS 기반 tx, in-flight 카운터) 은 DB 도메인에 특화돼 그대로 옮기긴 어렵다. 다른 도메인은 비슷한 wrapper 를 도메인별로 따로 만드는 것이 맞다.
+
+---
+
 # 트랜잭션 안전망 참고 자료
 
 ## TxState 속성 역할 정리
