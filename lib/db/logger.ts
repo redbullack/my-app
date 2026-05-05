@@ -26,8 +26,11 @@ class ConsoleDbLogger implements DbLogger {
   }
 
   private write(level: 'info' | 'warn' | 'error', event: string, fields: Record<string, unknown>) {
+    // loggedAt: 로거가 실제로 라인을 출력한 시각.
+    // 비동기 INSERT 구현체에서는 INSERT 시점이 늦어질 수 있으므로
+    // 쿼리의 진짜 시작/끝 시각은 fields.startedAt / fields.endedAt 으로 별도 보존된다.
     const line = JSON.stringify({
-      ts: new Date().toISOString(),
+      loggedAt: new Date().toISOString(),
       level,
       scope: 'db',
       event,

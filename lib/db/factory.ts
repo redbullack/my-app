@@ -131,6 +131,7 @@ async function withLifecycle<R>(
   const traceId = randomUUID()
   const log = getDbLogger()
   const start = Date.now()
+  const startedAt = new Date(start).toISOString()
 
   // 요청 컨텍스트(ALS) — actionAgent 에서 주입된 세션/액션/페이지 정보.
   // 스코프 바깥에서 호출되는 경우(예: warmup) 빈 객체로 안전하게 동작.
@@ -159,7 +160,9 @@ async function withLifecycle<R>(
 
   try {
     const result = await run(traceId)
-    const durationMs = Date.now() - start
+    const end = Date.now()
+    const endedAt = new Date(end).toISOString()
+    const durationMs = end - start
     if (loggable) log.info('db.ok', {
       db: args.dbName,
       provider: args.provider,
@@ -167,6 +170,8 @@ async function withLifecycle<R>(
       traceId,
       parentTraceId,
       actionTraceId,
+      startedAt,
+      endedAt,
       durationMs,
       sql: args.sql,
       binds: args.binds,
@@ -175,7 +180,9 @@ async function withLifecycle<R>(
     })
     return result
   } catch (err) {
-    const durationMs = Date.now() - start
+    const end = Date.now()
+    const endedAt = new Date(end).toISOString()
+    const durationMs = end - start
     const alreadyLogged = err instanceof DbError && loggedErrors.has(err)
     console.log(`SERVER: factory.ts - alreadyLogged: ${alreadyLogged}`)
 
@@ -188,6 +195,8 @@ async function withLifecycle<R>(
           traceId,
           parentTraceId,
           actionTraceId,
+          startedAt,
+          endedAt,
           durationMs,
           sql: args.sql,
           binds: args.binds,
@@ -208,6 +217,8 @@ async function withLifecycle<R>(
           traceId,
           parentTraceId,
           actionTraceId,
+          startedAt,
+          endedAt,
           durationMs,
           sql: args.sql,
           category: err.category,
@@ -233,6 +244,8 @@ async function withLifecycle<R>(
         traceId,
         parentTraceId,
         actionTraceId,
+        startedAt,
+        endedAt,
         durationMs,
         sql: args.sql,
         binds: args.binds,
