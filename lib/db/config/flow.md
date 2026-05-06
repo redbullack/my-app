@@ -1,3 +1,145 @@
+# 3-Layer Identity Chain — 세션/화면/쿼리 로그 자동 연결
+
+본 프로젝트는 모든 운영 로그가 **하나의 식별자 사슬**로 묶이도록 설계되어 있다. 팀원이 page.tsx / Server Action 어디에도 보일러플레이트를 추가하지 않아도, 로그인 → 화면 진입 → DB 호출이 자동으로 같은 식별자로 join 된다.
+
+```
+[로그인 1회]      USER_SESSION_LOG    → user_instance_id   (JWT 클레임에 박힘)
+       │ 1:N
+[화면 진입마다]    APP_SESSION_LOG    → app_instance_id    (sessionStorage 에 박힘)
+       │ 1:N
+[액션/쿼리마다]    LOG_QUERY          → 위 두 ID 가 모든 행에 동봉
+```
+
+세 가지 ID 의 거주지가 다르다는 점이 핵심이다.
+
+| ID | 발급 시점 | 거주지 | 수명 |
+|---|---|---|---|
+| `userInstanceId` | 로그인 1회 | **JWT 토큰 클레임** | 토큰 만료까지 불변 |
+| `appInstanceId`  | 화면 진입 1회 | **클라이언트 sessionStorage** | 같은 탭의 그 화면 동안 |
+| `traceId`        | 액션/쿼리 1회 | **AsyncLocalStorage (ALS)** | 단일 요청 |
+
+ID 가 흐르는 경로는 다음 단계로 이루어진다 — 단계별 책임 파일을 함께 적는다.
+
+## 단계 0 — 서버 인스턴스 식별 (모듈 로드 시 1회)
+
+[lib/utils/server/serverIp.ts](../../utils/server/serverIp.ts)
+
+`os.networkInterfaces()` 로 외부 노출 IPv4 → IPv6 → hostname 순으로 탐색하여 `SERVER_IP` 상수를 1회 평가한다. 매 요청마다 다시 계산할 필요가 없는 "프로세스 자체 정보"이므로 모듈 상수로 보관한다. 이후 USER_SESSION_LOG / APP_SESSION_LOG INSERT, ALS 컨텍스트의 `serverIp` 에 모두 이 상수가 들어간다.
+
+## 단계 1 — 로그인 시 `userInstanceId` 발급 + USER_SESSION_LOG 1행
+
+[lib/auth/auth.ts](../../auth/auth.ts) `jwt` 콜백
+
+NextAuth 의 `jwt` 콜백은 최초 로그인 시 1회만 `user` 인자를 받는다. 그 시점에:
+
+1. `randomUUID()` 로 새 `userInstanceId` 발급
+2. `headers().get('x-forwarded-for')` 로 클라이언트 IP 확보
+3. `insertUserSessionLog({ userInstanceId, userId, empId, clientIp, serverIp, loginTime, expireTime })` 호출
+4. `token.userInstanceId = userInstanceId` 로 토큰에 박음
+
+이후 `session` 콜백이 `session.user.userInstanceId = token.userInstanceId` 로 클라이언트에도 노출시켜, 서버는 `auth()`, 클라이언트는 `useSession()` 으로 어디서나 동일한 ID 를 읽을 수 있게 된다.
+
+타입 확장은 [types/next-auth.d.ts](../../../types/next-auth.d.ts) 에서 User / Session / JWT 세 인터페이스에 모두 추가되어 있다.
+
+## 단계 2 — INSERT 스텁 (운영 전환 지점)
+
+[lib/app/sessionLog.ts](../../app/sessionLog.ts)
+
+`insertUserSessionLog` / `insertAppSessionLog` 두 함수의 실제 INSERT 위치. 현재는 운영 테이블이 없으므로 콘솔 한 줄 JSON 출력 stub 이며, 본문에 실제 SQL 이 TODO 주석으로 박혀 있다. 운영 전환 시 이 두 함수만 교체하면 된다.
+
+⚠️ 이 모듈에서 `getDb()` / `withLifecycle` 을 경유해 INSERT 하면 §1-1 에서 설명한 무한 재귀가 즉시 발생한다. logger 전용 풀을 직접 사용해야 한다.
+
+## 단계 3 — 클라이언트 요청 입구에서 `pathname` forward
+
+[proxy.ts](../../../proxy.ts)
+
+`x-pathname` 헤더를 응답 헤더가 아닌 **request 헤더**로도 forward 한다 (`NextResponse.next({ request: { headers } })`). 이래야 단계 4 의 `template.tsx` 가 server 측에서 `headers().get('x-pathname')` 으로 현재 경로를 읽을 수 있다. layout/template 은 `params` 로 전체 pathname 을 받지 못하므로 이 헤더 우회가 필수다.
+
+## 단계 4 — 화면 진입 시 `appInstanceId` 발급 + APP_SESSION_LOG 1행 (자동)
+
+[app/template.tsx](../../../app/template.tsx) → [lib/app/openAppSession.ts](../../app/openAppSession.ts) → [components/app/AppBootstrap.tsx](../../../components/app/AppBootstrap.tsx)
+
+Next.js 의 `template.tsx` 는 layout 과 달리 **모든 navigation 마다 다시 mount/실행**되는 특수 파일이다. 이 성질을 이용해 page.tsx 보일러플레이트 0 으로 화면 진입 hook 을 자동화한다.
+
+흐름:
+
+1. `template.tsx` 가 `headers().get('x-pathname')` 에서 현재 경로를 얻음
+2. 정규식 `/^\/([A-Z]\d{3})(?:\/|$)/` 로 화면 식별자(`'A001'` 등) 추출
+3. `appId` 가 있고 로그인 상태면 `openAppSession(appId)` 호출
+4. `openAppSession` 은 `cache()` 로 같은 요청 안에서 1회만 실행되며 `getAppInfo` 로 APP_INFO 기준정보를 항상 최신 조회 → `randomUUID()` 로 `appInstanceId` 발급 → `insertAppSessionLog` 호출
+5. 결과 `{ appInstanceId, appInfo }` 를 `<AppBootstrap>` (Client Component) 으로 전달
+6. `<AppBootstrap>` 이 `useLayoutEffect` 안에서 `sessionStorage` 에 `appInstanceId` / `appId` / `appInfo` 동기화
+
+팀원이 `app/A001/page.tsx` 를 작성할 때 어떠한 추가 코드도 필요 없다. 화면 폴더명을 `[영문 1자 + 숫자 3자]` 패턴으로 유지하기만 하면 끝.
+
+## 단계 5 — Server Action 호출 시 클라이언트 → 서버로 `appInstanceId` 운반 (자동)
+
+[components/app/ActionContextInstaller.tsx](../../../components/app/ActionContextInstaller.tsx)
+
+Next.js 의 server action 은 내부적으로 현재 페이지 URL 로 POST + `next-action` 헤더를 붙여 호출된다. 이 컴포넌트는 [app/layout.tsx](../../../app/layout.tsx) 에 한 번 마운트되어 `window.fetch` 를 1회 patch 한다. 패치된 fetch 는:
+
+1. 요청 헤더에 `next-action` 이 있는 경우만 (= server action 호출만) 가로챔 — 일반 fetch 에는 영향 0
+2. `sessionStorage` 의 `appInstanceId` / `appId` 를 꺼내 `x-app-instance-id` / `x-app-id` 헤더로 주입
+3. 원본 fetch 로 그대로 위임
+
+덕분에 **모든 Server Action 의 시그니처를 변경하지 않고도** ALS 가 단계 6 에서 이 값을 읽을 수 있다. sessionStorage 가 탭별로 격리되므로 멀티탭 충돌도 자동으로 해결된다.
+
+⚠️ 이 헤더는 클라이언트가 임의로 박을 수 있는 값이므로 "분류용/로깅용" 으로만 사용한다. 권한 판단은 JWT 의 `userInstanceId` / `role` 로 한다.
+
+## 단계 6 — actionAgent 가 모든 ID 를 ALS 에 한 번에 담음
+
+[lib/utils/server/actionWrapper.ts](../../utils/server/actionWrapper.ts) `buildRequestContext`
+
+요청 진입 시 `RequestContext` 를 채워 `runWithRequestContext` 로 ALS 에 주입한다. 채워지는 값:
+
+| 출처 | 필드 |
+|---|---|
+| `randomUUID()` | `traceId` (액션 1회) |
+| `auth()` 세션 | `userId` / `userName` / `role` / `empno` / **`userInstanceId`** |
+| `headers()` | `pagePath` (referer) / `clientIp` (x-forwarded-for) / **`appInstanceId`** (x-app-instance-id) / **`appId`** (x-app-id) |
+| 모듈 상수 | `serverIp` (= SERVER_IP) |
+
+이 값들이 ALS 에 들어가면 **하위에서 호출되는 모든 코드가 파라미터 전달 없이** 같은 컨텍스트를 읽는다. RequestContext 인터페이스는 [lib/utils/server/requestContext.ts](../../utils/server/requestContext.ts) 에서 정의되어 있다.
+
+## 단계 7 — 모든 DB 쿼리 로그에 ID 들이 자동 동봉
+
+[lib/db/factory.ts](../factory.ts) `withLifecycle` 의 `ctxFields`
+
+`getDb('MAIN').query(...)` 가 호출되면 `withLifecycle` 이 ALS 에서 `RequestContext` 를 읽어 `ctxFields` 에 다음을 박는다:
+
+```ts
+const ctxFields = {
+  actionName, pagePath, userId, userName, role, empno,
+  userInstanceId, appInstanceId, appId, clientIp, serverIp,
+}
+```
+
+이 객체는 `log.info('db.ok', { ...ctxFields, sql, binds, durationMs, ... })` 의 일부로 들어가, **LOG_QUERY 의 모든 행**에 자동으로 user/app instance ID 가 동봉된다. 즉 LOG_QUERY 의 `instance_id` (= `userInstanceId`) / `app_id` 컬럼이 USER_SESSION_LOG / APP_SESSION_LOG 의 PK 와 곧바로 join 되어, 단일 join 으로 "유저 X가 화면 Y에서 친 쿼리 전부" 를 추적할 수 있게 된다.
+
+---
+
+## 팀원이 일상 코드에서 신경 쓸 것
+
+| 작업 | 추가로 해야 할 것 |
+|---|---|
+| 새 화면 추가 (`app/B003/page.tsx`) | **없음** — 폴더명만 `[A-Z]\d{3}` 패턴이면 끝 |
+| 새 Server Action 추가 | **없음** — 기존처럼 `actionAgent('name', () => ...)` 만 쓰면 끝 |
+| 클라이언트에서 action 호출 | **없음** — 평소대로 import 후 호출 |
+| Server 어디서나 userInfo 읽기 | `(await auth()).user.userInstanceId` |
+| Client 어디서나 userInfo 읽기 | `useSession().data.user.userInstanceId` |
+| Client 어디서나 appInfo 읽기 | `JSON.parse(sessionStorage.getItem('appInfo') ?? '{}')` |
+| Server 어디서나 appInfo 읽기 | `await getAppInfo(appId)` (요청 캐시) |
+
+## 운영 전환 시 할 일 (체크리스트)
+
+1. [lib/app/sessionLog.ts](../../app/sessionLog.ts) 의 두 함수 본문을 실제 INSERT 로 교체
+2. [lib/app/openAppSession.ts](../../app/openAppSession.ts) 의 `getAppInfo` stub 을 실제 APP_INFO SELECT 로 교체
+3. [lib/auth/auth.ts](../../auth/auth.ts) jwt 콜백의 `securityLevel` / `approvalSite` 를 권한 테이블 JOIN 결과로 채움
+4. logger 전용 풀 분리 (§1-1, §1-6 참조)
+5. LOG_QUERY 테이블 컬럼이 `userInstanceId` / `appInstanceId` / `appId` / `clientIp` / `serverIp` 를 받도록 매핑 (§1-5 의 하이브리드 권장)
+
+---
+
 # DB 로그 테이블 INSERT 전환 가이드
 
 `lib/db/logger.ts` 의 `ConsoleDbLogger` 를 운영용 `OracleDbLogger` (DB 테이블 INSERT 구현체) 로 교체할 때 반드시 검토해야 할 설계 포인트를 정리한다. `lib/db/factory.ts` 의 `withLifecycle` 이 페이로드를 만드는 단일 지점이므로, 이 흐름을 이해하지 못한 채 구현체만 갈아끼우면 무한 재귀 / 로그 손실 / 시점 왜곡 / 보안 사고가 발생한다.
