@@ -90,6 +90,20 @@ export interface IDbClient {
   tx<R>(fn: () => Promise<R>): Promise<R>
 }
 
+export interface ISysDbClient {
+  query<T = Record<string, unknown>>(
+    sql: string,
+    binds?: BindParams,
+    opts?: QueryOptions,
+  ): Promise<QueryResult<T>>
+
+  execute<T = Record<string, unknown>>(
+    sql: string,
+    binds?: BindParams,
+    opts?: QueryOptions,
+  ): Promise<ExecuteResult<T>>
+}
+
 /** 풀 옵션. 미지정 항목은 provider 기본값 사용. */
 export interface PoolOptions {
   /** 최소 커넥션 수 (default: 1) */

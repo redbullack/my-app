@@ -112,8 +112,8 @@ function parseAdoConnectionString(
     providerName,
     dsn: { user, password, connectString },
     pool: {
-      min: poolMin ?? 100,
-      max: poolMax ?? 100,
+      min: poolMin ?? 10,
+      max: poolMax ?? 1000,
       increment: poolIncrement ?? 1,
     },
   }

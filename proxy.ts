@@ -205,6 +205,8 @@ export async function proxy(request: NextRequest) {
   const token = await getToken({ req: request, secret: process.env.AUTH_SECRET })
   const { pathname } = request.nextUrl
   const isLoggedIn = !!token
+  // test
+  console.log(`SERVER: proxy.ts - token.name: ${token?.name} / isLoggedIn: ${isLoggedIn}`)
 
   // 보호 경로: 미인증 시 /login으로 리다이렉트
   const isProtected = PROTECTED_PATHS.some((p) => pathname.startsWith(p))

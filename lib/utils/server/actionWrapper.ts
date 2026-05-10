@@ -21,6 +21,8 @@
  */
 import { randomUUID } from 'node:crypto'
 import { headers } from 'next/headers'
+import { redirect } from 'next/navigation'
+import type { Session } from 'next-auth'
 import { auth } from '@/lib/auth/auth'
 import { DbError, type DbErrorCategory } from '@/lib/db'
 import type { ActionResponse, ActionError, ErrorType } from '../type'
@@ -29,8 +31,9 @@ import { acquireUserSlot, ActionBusyError } from './userConcurrency'
 
 /** DbError.category → ActionError.type */
 const DB_CATEGORY_MAP: Record<DbErrorCategory, ErrorType> = {
-    constraint: 'db_constraint',
+    auth: 'auth',
     permission: 'db_permission',
+    constraint: 'db_constraint',
     config: 'db_system',
     connection: 'db_system',
     syntax: 'db_system',
@@ -83,21 +86,35 @@ export async function actionAgent<T>(
 async function buildRequestContext(actionName: string): Promise<RequestContext> {
     const traceId = randomUUID()
     console.log(`SERVER: buildRequestContext - traceId: ${traceId}`)
-    let userId: string | undefined
-    let userName: string | undefined
-    let role: string | undefined
-    let empno: number | undefined
+
+    // 세션 조회 — auth() 자체가 throw 하는 경우(예: 인증 인프라 장애)도
+    // "세션 없음" 으로 간주하여 로그인 화면으로 보낸다. 본 프로젝트는 비로그인
+    // 사용 가능 화면이 0개이므로, 미인증 상태로 액션이 진행될 여지는 없다.
+    let session: Session | null = null
     try {
-        const session = await auth()
-        if (session?.user) {
-            userId = session.user.id
-            userName = session.user.name
-            role = session.user.role
-            empno = session.user.empno
-        }
-    } catch {
-        // 세션 조회 실패는 무시 — 비로그인/로그인 플로우도 액션을 호출할 수 있다.
+        session = (await auth()) as Session | null
+    } catch (err) {
+        console.warn(
+            JSON.stringify({
+                ts: new Date().toISOString(),
+                level: 'warn',
+                scope: 'server.action',
+                event: 'action.auth_failed',
+                action: actionName,
+                traceId,
+                errorMessage: err instanceof Error ? err.message : String(err),
+            }),
+        )
     }
+
+    if (!session?.user) {
+        // redirect() 는 NEXT_REDIRECT 에러를 throw 하므로 반드시 try/catch 바깥에서
+        // 호출되어야 한다. buildRequestContext 는 actionAgent 의 try/catch 바깥에서
+        // 호출되므로 안전하게 propagate 되어 Next.js 가 로그인 페이지로 이동시킨다.
+        redirect('/login')
+    }
+
+    const { id: userId, name: userName, role, empno } = session.user
 
     let pagePath: string | undefined
     try {
@@ -107,7 +124,7 @@ async function buildRequestContext(actionName: string): Promise<RequestContext> 
         // headers() 사용 불가 컨텍스트(예: 테스트) 대비.
     }
 
-    return { traceId, userId, userName, role, empno, actionName, pagePath, loggable: true }
+    return { traceId, userId, userName, role, empno, actionName, pagePath }
 }
 
 function toActionError(err: unknown, actionName: string): ActionError {

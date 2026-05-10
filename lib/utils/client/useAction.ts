@@ -19,6 +19,23 @@ import { useCallback, useState } from 'react'
 import { AppError, type ActionResponse } from '../type'
 import { handleGlobalError } from './globalErrorHandler'
 
+/**
+ * Next.js 의 redirect() 가 던지는 NEXT_REDIRECT 에러인지 판별.
+ *
+ * Server Action 안에서 redirect() 가 호출되면 message="NEXT_REDIRECT" + digest=`NEXT_REDIRECT;...`
+ * 형태의 에러가 클라이언트로 reject 된다. 이 케이스는 "에러" 가 아니라 정상적인 네비게이션이므로
+ * 토스트/전역 에러 핸들러로 빠지면 안 된다 (Next 런타임이 별도로 페이지 이동을 처리한다).
+ *
+ * digest 우선 체크 — message 만 체크하면 사용자가 우연히 같은 문자열을 던지는 경우와 충돌.
+ */
+function isNextRedirectError(err: unknown): boolean {
+    if (err == null || typeof err !== 'object') return false
+    const digest = (err as { digest?: unknown }).digest
+    if (typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT')) return true
+    const message = (err as { message?: unknown }).message
+    return message === 'NEXT_REDIRECT'
+}
+
 interface ExecuteOptions<T> {
     onSuccess?: (data: T) => void
     /** 반환값이 'handled' 면 전역 에러 핸들러 호출을 스킵한다. */
@@ -55,6 +72,9 @@ export function useAction() {
                     }
                     handleGlobalError(appError)
                 } catch (err: unknown) {
+                    // redirect() 는 에러가 아니라 정상 네비게이션 — Next 런타임이 처리하도록
+                    // rethrow 하고 토스트/onError 로 빠지지 않게 한다.
+                    if (isNextRedirectError(err)) throw err
                     if (opts.silent) return
                     if (opts.throwToBoundary) {
                         setBoundaryError(() => { throw err })

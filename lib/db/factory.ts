@@ -46,6 +46,7 @@ import { resolveFromEnv } from './resolvers/env'
 import type {
   BindParams,
   IDbClient,
+  ISysDbClient,
   ProviderName,
   QueryOptions,
 } from './types'
@@ -76,13 +77,7 @@ const txStore = new AsyncLocalStorage<TxState>()
 
 /** 클라이언트 캐시. 모듈 스코프에 보관하여 HMR 시 재생성되도록 한다. */
 const clientCache = new Map<string, IDbClient>()
-
-/**
- * lifecycle 에서 이미 로깅한 DbError 추적용.
- * Error 인스턴스에 직접 속성을 박아넣지 않기 위해 WeakSet 으로 분리.
- * GC 시 자동 해제되므로 누수 우려 없음.
- */
-const loggedErrors = new WeakSet<DbError>()
+const sysClientCache = new Map<string, ISysDbClient>()
 
 /**
  * DB 이름 화이트리스트.
@@ -136,6 +131,14 @@ async function withLifecycle<R>(
   // 요청 컨텍스트(ALS) — actionAgent 에서 주입된 세션/액션/페이지 정보.
   // 스코프 바깥에서 호출되는 경우(예: warmup) 빈 객체로 안전하게 동작.
   const reqCtx = getRequestContext()
+  if (!reqCtx.empno) {
+    throw new DbError({
+      category: 'auth',
+      traceId,
+      devMessage:
+        '인증되지 않은 컨텍스트에서 DB 호출이 시도되었습니다. Server Action 은 actionAgent 를 통해 호출해야 합니다.',
+    })
+  }
 
   // 3-tier traceId 모델 (OpenTelemetry 의 trace_id/parent_span_id/span_id 와 유사):
   //   - traceId        : 본 호출 자체의 식별자 (query/execute/tx 각각 새로 발급)
@@ -156,14 +159,12 @@ async function withLifecycle<R>(
     empno: reqCtx.empno,
   }
 
-  const loggable = reqCtx.loggable === true
-
   try {
     const result = await run(traceId)
     const end = Date.now()
     const endedAt = new Date(end).toISOString()
     const durationMs = end - start
-    if (loggable) log.info('db.ok', {
+    log.info('db.ok', {
       db: args.dbName,
       provider: args.provider,
       op: args.op,
@@ -183,60 +184,8 @@ async function withLifecycle<R>(
     const end = Date.now()
     const endedAt = new Date(end).toISOString()
     const durationMs = end - start
-    const alreadyLogged = err instanceof DbError && loggedErrors.has(err)
-    console.log(`SERVER: factory.ts - alreadyLogged: ${alreadyLogged}`)
 
     if (err instanceof DbError) {
-      if (!alreadyLogged && loggable) {
-        log.error('db.err', {
-          db: args.dbName,
-          provider: args.provider,
-          op: args.op,
-          traceId,
-          parentTraceId,
-          actionTraceId,
-          startedAt,
-          endedAt,
-          durationMs,
-          sql: args.sql,
-          binds: args.binds,
-          category: err.category,
-          code: err.code,
-          devMessage: err.devMessage,
-          cause: err.cause instanceof Error ? err.cause.message : String(err.cause ?? ''),
-          ...ctxFields,
-        })
-        loggedErrors.add(err)
-        console.log(`SERVER: factory.ts - loggedErrors.add(err): ${loggedErrors}`)
-      } else if (args.op === 'transaction' && loggable) {
-        // 하위 쿼리에서 이미 로깅되었더라도, 트랜잭션 단위 실패 집계를 위해 요약 1줄 추가.
-        log.error('db.err', {
-          db: args.dbName,
-          provider: args.provider,
-          op: 'transaction',
-          traceId,
-          parentTraceId,
-          actionTraceId,
-          startedAt,
-          endedAt,
-          durationMs,
-          sql: args.sql,
-          category: err.category,
-          code: err.code,
-          devMessage: err.devMessage,
-          cause: err.cause instanceof Error ? err.cause.message : String(err.cause ?? ''),
-          ...ctxFields,
-        })
-      }
-      throw err
-    }
-    const wrapped = new DbError({
-      category: 'unknown',
-      traceId,
-      cause: err,
-      devMessage: 'Unhandled error in DB lifecycle',
-    })
-    if (loggable) {
       log.error('db.err', {
         db: args.dbName,
         provider: args.provider,
@@ -249,13 +198,36 @@ async function withLifecycle<R>(
         durationMs,
         sql: args.sql,
         binds: args.binds,
-        category: 'unknown',
-        cause: err instanceof Error ? err.message : String(err),
+        category: err.category,
+        code: err.code,
+        devMessage: err.devMessage,
+        cause: err.cause instanceof Error ? err.cause.message : String(err.cause ?? ''),
         ...ctxFields,
       })
-      loggedErrors.add(wrapped)
-      console.log(`SERVER: factory.ts - loggedErrors.add(wrapped): ${loggedErrors}`)
+      throw err
     }
+    const wrapped = new DbError({
+      category: 'unknown',
+      traceId,
+      cause: err,
+      devMessage: 'Unhandled error in DB lifecycle',
+    })
+    log.error('db.err', {
+      db: args.dbName,
+      provider: args.provider,
+      op: args.op,
+      traceId,
+      parentTraceId,
+      actionTraceId,
+      startedAt,
+      endedAt,
+      durationMs,
+      sql: args.sql,
+      binds: args.binds,
+      category: 'unknown',
+      cause: err instanceof Error ? err.message : String(err),
+      ...ctxFields,
+    })
     throw wrapped
   }
 }
@@ -465,6 +437,36 @@ export function getDb(name: string = 'MAIN'): IDbClient {
   }
 
   clientCache.set(name, client)
+  return client
+}
+
+/**
+ * 인증/로깅 전용. 절대 사용자 액션 코드에서 호출 금지.
+ * - withLifecycle 우회 → ALS 가드/로깅 없음 (재귀/순환 의존 차단)
+ * - tx 미지원 → 트랜잭션 우회 경로 원천 봉쇄
+ * - 풀은 factory 와 동일 풀 공유 (provider 캐시)
+ */
+export function getSysDb(name = 'MAIN'): ISysDbClient {
+  const cached = sysClientCache.get(name)
+  if (cached) return cached
+
+  const envResult = resolveFromEnv(name)
+  if (!envResult) throw new DbError({ category: 'config',devMessage: `환경변수 DB_CONNECTION__${name} 이 설정되지 않았습니다`,})
+
+  const { providerName, dsn, pool } = envResult
+  const provider = getProvider(providerName)
+
+  const client: ISysDbClient = {
+    query: (sql: string, binds: BindParams = {}, opts: QueryOptions = {}) => {
+      const safeOpts = pickPublicOpts(opts)
+      return provider.query(name, dsn, pool, sql, binds, safeOpts)
+    },
+    execute: (sql: string, binds: BindParams = {}, opts: QueryOptions = {}) => {
+      const safeOpts = pickPublicOpts(opts)
+      return provider.execute(name, dsn, pool, sql, binds, safeOpts)
+    }
+  }
+  sysClientCache.set(name, client)
   return client
 }
 
