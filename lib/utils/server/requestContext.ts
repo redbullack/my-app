@@ -14,10 +14,16 @@
  *  - empno       : session.user.empno
  *  - actionName  : actionAgent 의 첫 번째 인자
  *  - pagePath    : 호출이 발생한 페이지(referer 기반, 없으면 undefined)
- *  - loggable    : DB lifecycle 로그를 남길지 여부(opt-in). 프레임워크 내부 쿼리
- *                  (NextAuth 세션 조회, warmup 등)는 컨텍스트 자체가 없거나
- *                  loggable=false 이므로 자동으로 로그에서 제외된다.
- *                  사용자 유발 진입점(actionAgent / page / route handler wrapper)에서만 true 로 세팅한다.
+ *
+ * 로그 분리 정책:
+ *  - 프레임워크 내부 쿼리(NextAuth 세션 조회, warmup) 는 getSysDb / provider.warmup 으로
+ *    withLifecycle 자체를 우회하므로 자동으로 로그에서 제외된다.
+ *  - withLifecycle 이 실제로 실행되는 경로는 모두 actionAgent 컨텍스트(인증된 사용자 액션)뿐이며
+ *    전부 로깅 대상이다. 별도의 loggable 플래그는 두지 않는다.
+ *
+ * 불변성:
+ *  - 컨텍스트는 actionAgent 진입 시 1회 세팅 후 변경되지 않는다.
+ *  - 하위 코드가 ALS 값을 함부로 바꾸지 못하도록 readonly 로 노출한다.
  *
  * 주의:
  *  - DB 로거(OracleDbLogger) 에서 getRequestContext() 로 읽어 INSERT 에 사용한다.
@@ -27,14 +33,13 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 
 export interface RequestContext {
-    traceId: string
-    userId?: string
-    userName?: string
-    role?: string
-    empno?: number
-    actionName?: string
-    pagePath?: string
-    loggable?: boolean
+    readonly traceId: string
+    readonly userId?: string
+    readonly userName?: string
+    readonly role?: string
+    readonly empno?: number
+    readonly actionName?: string
+    readonly pagePath?: string
 }
 
 const storage = new AsyncLocalStorage<RequestContext>()
@@ -44,10 +49,12 @@ export function runWithRequestContext<T>(
     ctx: RequestContext,
     fn: () => Promise<T>,
 ): Promise<T> {
-    return storage.run(ctx, fn)
+    // 깊은 freeze 는 비용/형태 보존 측면에서 과하므로 최상위만 freeze 한다.
+    // 인터페이스 readonly 와 결합되어 컴파일/런타임 양쪽에서 변형을 차단한다.
+    return storage.run(Object.freeze({ ...ctx }), fn)
 }
 
 /** 현재 컨텍스트 조회. 스코프 바깥이면 빈 객체. */
-export function getRequestContext(): Partial<RequestContext> {
+export function getRequestContext(): Readonly<Partial<RequestContext>> {
     return storage.getStore() ?? {}
 }

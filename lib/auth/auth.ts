@@ -11,7 +11,7 @@
 import NextAuth from 'next-auth'
 import Credentials from 'next-auth/providers/credentials'
 import type { Emp } from '@/types/emp'
-import { getDb } from '../db'
+import { getSysDb } from '../db/factory'
 
 /**
  * ──────────────────────────────────────────────────────────────
@@ -98,11 +98,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         // Oracle EMP 테이블에서 ENAME 조회
         const username = (credentials.username as string).toUpperCase()
-        const db = getDb('MAIN')
+        const db = getSysDb('MAIN')
         const result = await db.query<Emp>(
           'SELECT EMPNO, ENAME, JOB FROM EMP WHERE ENAME = :username',
           [username],
         )
+        console.log(`SERVER: auth.ts - actionAgent 완료 - rows: ${result.rows.length}, first EMPNO: ${result.rows[0]?.EMPNO}`)
 
         if (result.rows.length === 0) return null
 
@@ -216,6 +217,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.issuedAt = Date.now()
       }
 
+      // async jwt({ token, user, account }) {
+      //   if (user) { /* 최초 로그인 — DB 조회 */ }
+        
+      //   // accessToken 유효 → 그대로 반환 (DB 안 탐)
+      //   if (Date.now() < (token.accessTokenExpires as number)) return token
+        
+      //   // 만료 → refreshToken 으로 IdP 갱신 + 필요 시 DB sync (15분에 1회)
+      //   // refresh 실패 시 fallback — IdP 가 일시 장애면 throw 하지 말고 
+      //   // token.error = 'RefreshAccessTokenError' 를 세팅하고 그걸 actionWrapper 에서 잡아 redirect 처리하는 게 안전하다. 
+      //   // throw 하면 catch (line 96) 로 빠져 매 요청 redirect 루프가 생길 수 있다.
+      //   return refreshAccessToken(token)
+      // }
       return token
     },
 

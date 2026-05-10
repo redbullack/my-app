@@ -305,6 +305,43 @@ Next.js 16 + React 19 환경에서 발생 가능한 **모든 에러 경로**를 
   - `Session.user` — 클라이언트 노출 안전 필드 vs 절대 금지 필드 구분
   - `JWT` — 보안 권장 / 유틸 편의 / 절대 금지 필드 분류
 
+### 🛡️ 미인증 차단 layered defense (신규)
+프로젝트 정책: **비로그인 사용자가 접근 가능한 화면이 0개** 임을 전제로, 다음 두 레이어가 독립적으로 미인증 호출을 차단한다.
+
+- **Layer 1 — `proxy.ts` (페이지 진입 차단)**
+  - 보호 경로 진입 시 `getToken()` 으로 JWT 검증, 미인증이면 `/login` 리다이렉트
+  - 광역 1차 필터. 라우터에 닿기 전에 끊어 후속 비용(DB 풀, ALS 셋업) 자체를 발생시키지 않음
+- **Layer 2 — `actionAgent` + ALS (Server Action 차단)**
+  - `lib/utils/server/actionWrapper.ts` 의 `buildRequestContext` 에서 `auth()` 호출
+  - 세션 없음 / `auth()` throw 모두 `redirect('/login')` 으로 통일 처리
+  - `auth()` 시스템 장애 시 `action.auth_failed` 로 1회 로깅 후 redirect (사일런트 누락 방지)
+  - `redirect()` 는 `NEXT_REDIRECT` 에러를 throw 하므로 반드시 `actionAgent` try/catch **바깥**에서 호출
+- **Layer 3 — DB 레이어 최후 안전망**
+  - `lib/db/factory.ts` 의 `withLifecycle` 진입 시 ALS 의 `empno` 부재 시 `DbError(category:'auth')` throw
+  - 정상 경로에선 발동하지 않지만, 내부 호출이 `actionAgent` 우회 시 마지막 차단
+
+#### 시스템/프레임워크 전용 우회 경로 — `getSysDb()`
+- 인증/로깅 등 **JWT 인증을 우회해야 하는 시스템 쿼리** 전용 진입점
+- `withLifecycle` 우회 → ALS 가드 / 로깅 / tx 미지원
+- 사용처: `lib/auth/auth.ts` 의 EMP 조회, `OracleDbLogger` (운영 전환 시)
+- "로거가 자기 자신을 로깅" 하는 무한 재귀 원천 차단
+
+### 클라이언트 NEXT_REDIRECT digest 필터링
+- `lib/utils/client/useAction.ts` 의 catch 블록에서 `digest.startsWith('NEXT_REDIRECT')` 감지 시 rethrow
+- 정상 네비게이션을 토스트/전역 에러 핸들러로 빠지지 않게 분리
+- 결과: 세션 만료 redirect 시 "NEXT_REDIRECT" 토스트 노출 사라짐
+
+### 요청 컨텍스트(ALS) 강화
+- `lib/utils/server/requestContext.ts` 의 `RequestContext` 모든 필드 `readonly` 화
+- `runWithRequestContext` 가 `Object.freeze` 로 최상위 동결 → 하위 코드의 변경 차단
+- 불필요해진 `loggable` 플래그 제거 — `withLifecycle` 가 실행되는 모든 경로는 사용자 액션이므로 무조건 로깅
+- 추후 데이터 비즈니스 로직에서 `getRequestContext()` 가 안전하게 활용 가능
+
+### DB 로그 INSERT 구현 가이드
+- `lib/db/logger.ts` 의 `OracleDbLogger` 예시를 `getSysDb()` 기반으로 재작성
+- 운영 전환 시 별도 `DB_CONNECTION__LOG` 환경변수만 추가하면 코드 변경 없이 분리 가능
+- 3-tier traceId(`traceId` / `parentTraceId` / `actionTraceId`), `startedAt` / `endedAt` 등 풀 필드 INSERT 구조
+
 ## 🎨 테마 시스템
 
 ### 3가지 테마 모드

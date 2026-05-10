@@ -9,12 +9,68 @@
 
 | 항목 | 내용 |
 |------|------|
-| 목적 | Next.js 16의 App Router 기능 전체를 학습하고 체험하기 위한 연습용 프레임워크 |
+| 목적 | 현업 운영 환경에서 실무적으로 사용할 코드를 테스트하고 구현하는 실무 프레임워크 |
 | 프레임워크 | Next.js 16 (App Router) |
 | UI 라이브러리 | React 19 |
 | 스타일링 | TailwindCSS 4 |
 | 언어 | TypeScript (strict mode) |
 | 패키지 매니저 | pnpm (선호) / npm 가능 |
+
+> **중요**: 이 프로젝트는 더 이상 학습/연습용 프레임워크가 아니다. 현업 운영 환경에서 실제로 사용될 코드를 테스트하고 검증하는 것을 목표로 한다. 코드 품질, 보안, 성능, 유지보수성을 최우선으로 고려하여 작성한다.
+
+---
+
+## 1-A. 운영 환경 전제 (Production Runtime Assumptions)
+
+이 프로젝트의 모든 코드는 아래 운영 환경에서 무리 없이 동작하는 것을 1차 목표로 한다. 학습/연습용 단일 인스턴스 가정으로 설계하지 않는다.
+
+### 1-A-1. 실무 프로젝트 선언
+- 본 코드베이스는 운영 환경에서 그대로 돌아갈 수 있는 수준의 실무 프로젝트로 구현한다.
+- 동시접속자 수가 많고, 화면당 1개 이상의 무거운 조회 쿼리가 일상적으로 동작하는 부하 프로파일을 가정한다.
+- 코드 품질, 보안, 성능, 관측성(로그/traceId), 유지보수성을 항상 우선한다.
+
+### 1-A-2. L4 + 멀티 서버 (Sticky Session 없음)
+- L4 로드밸런서 뒤에 **Node.js 인스턴스 2대**가 배치된다.
+- **Sticky Session 미사용 / 랜덤 분배** — 현업 정책상 변경 불가. 따라서 다음을 절대 가정하지 않는다:
+  - "직전 요청과 같은 서버로 도착한다"
+  - "메모리 캐시/세션 메모리 보관/in-memory rate limiter"가 일관되게 동작한다
+- 서버 인스턴스에 종속되는 모든 상태는 **stateless 또는 외부 저장소(DB, 토큰, 쿠키)** 로 옮겨야 한다.
+- 동시 실행 게이트, 캐시, 큐 등 인스턴스-로컬 자원은 **서버당 임계치를 1대 기준으로 잡지 말고**, 항상 "한 유저 요청이 임의의 서버로 분배된다"는 전제로 설계한다.
+
+### 1-A-3. Oracle Connection Pool 정책
+- DB는 Oracle, 드라이버는 `oracledb` (thin 또는 thick) 를 사용한다.
+- **풀 사이즈는 인스턴스당 기준이며, 전체 DB 동시 연결 수 = `poolMax × 인스턴스 수`** 임을 항상 인지한다.
+- 본 프로젝트의 기본 풀 정책 (per-instance):
+
+  | 항목 | 값 | 근거 |
+  |------|----|------|
+  | `poolMin` | **100** | 화면당 1개 이상 무거운 쿼리 + 동시접속자 다수 → 매 요청마다 connection을 1개씩 신규로 따는 acquire 비용/지연이 지배적이라 판단. 평시 트래픽을 풀 안에서 흡수. |
+  | `poolMax` | **1000** | 피크 시 burst 흡수. C# 시절에도 동일 환경에서 max 10,000으로 운용한 전례가 있어 1000은 보수적인 상한. |
+  | `poolIncrement` | 적정값 (예: 10) | 100 → 1000 사이 확장 시 1개씩 늘어나는 기본값은 비효율. |
+  | `poolTimeout` | 적정값 | idle 연결 회수. min 아래로는 줄지 않음. |
+  | `queueTimeout` | 짧게 | 대기 폭주 시 빠르게 `busy` 에러로 전환 → 사용자에게 토스트 안내. |
+
+- DB(Oracle) 측 `processes` / `sessions` 한도는 `poolMax × 인스턴스 수` 보다 충분히 커야 한다. 인프라 협의 시 반드시 함께 검토한다.
+
+### 1-A-4. UV_THREADPOOL_SIZE
+- `oracledb`는 libuv 스레드풀에서 DB I/O를 처리하므로 기본값 4는 부족하다. **128 이상**으로 설정한다.
+- **`UV_THREADPOOL_SIZE`는 `oracledb` 모듈이 로드되기 전에 설정되어야 한다.** 즉, Node 프로세스 시작 시점에 환경변수로 들어가 있어야 한다.
+- 설정 위치 (권장 우선순위):
+  1. **운영 배포 (PM2 / 컨테이너 / systemd)**: 프로세스 매니저의 환경변수로 주입 — 이게 정석.
+     - PM2: `ecosystem.config.js`의 `env.UV_THREADPOOL_SIZE = '128'`
+     - Docker: `Dockerfile`의 `ENV UV_THREADPOOL_SIZE=128` 또는 compose `environment:`
+     - systemd: `Environment=UV_THREADPOOL_SIZE=128`
+  2. **로컬 개발**: `.env.local`은 Next.js가 읽는 시점이 늦어 신뢰할 수 없다. `package.json`의 `scripts`에서 **프로세스 시작 명령어 앞에 직접** 지정한다.
+     ```json
+     "scripts": {
+       "dev": "cross-env UV_THREADPOOL_SIZE=128 next dev",
+       "start": "cross-env UV_THREADPOOL_SIZE=128 next start"
+     }
+     ```
+     (Windows/Mac/Linux 호환을 위해 `cross-env` 사용. PowerShell에서는 `$env:UV_THREADPOOL_SIZE='128'; next dev`도 가능하나 팀 호환성상 `cross-env` 권장.)
+- **`package.json`의 최상위 필드(예: `engines`)로는 설정할 수 없다.** Node 프로세스 환경변수가 아니기 때문이다. 반드시 "프로세스를 띄우는 명령" 단계에서 주입한다.
+- 검증: 앱 부팅 직후 `console.log('UV_THREADPOOL_SIZE=', process.env.UV_THREADPOOL_SIZE)`로 1회 출력하여 의도한 값이 들어갔는지 확인한다.
+
 
 ---
 

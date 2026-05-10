@@ -19,6 +19,7 @@ export type DbErrorCategory =
   | 'syntax'      // SQL 구문/객체 미존재
   | 'constraint'  // PK/UNIQUE/FK/CHECK 위반
   | 'permission'  // 권한/인증 실패
+  | 'auth'        // 인증되지 않은 컨텍스트에서 DB 호출 시도 (factory 게이트에서 차단)
   | 'transaction' // tx 사용 규약 위반 (중첩 tx, 교차 DB 호출, abort/closing 이후 호출, await 누락 등)
   | 'unknown'     // 분류 불가
 
