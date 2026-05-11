@@ -17,36 +17,19 @@
 
 import { Suspense, use, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import type { GridEventName, OptColumn, OptRow, OptRowHeader } from 'tui-grid/types/options'
-import { cn, AppError, type ActionResponse } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary'
-import { handleGlobalError } from '@/lib/utils/client/globalErrorHandler'
+import {
+  handleGlobalError,
+  resolveDataSource,
+  type DataSource as BaseDataSource,
+} from '@/lib/utils/client'
 
 /* ── 타입 ── */
 
 type Row = Record<string, unknown>
-type DataSource<T extends object = Row> =
-  | T[]
-  | Promise<T[]>
-  | Promise<ActionResponse<T[]>>
-  | (() => T[] | Promise<T[]> | Promise<ActionResponse<T[]>>)
-
-/** resolve된 값이 ActionResponse envelope인지 판별. */
-function isActionResponse<T>(v: unknown): v is ActionResponse<T> {
-  return typeof v === 'object' && v !== null && 'isSuccess' in v
-}
-
-/**
- * envelope 이면 언래핑, 아니면 그대로 반환. 실패 시 handleGlobalError + throw.
- * Grid 내부 Promise 체인에서 사용 → 실패 시 Suspense 바운더리의 ErrorBoundary 가 받는다.
- */
-function unwrapEnvelope<T extends object>(value: T[] | ActionResponse<T[]>): T[] {
-  if (isActionResponse<T[]>(value)) {
-    if (value.isSuccess) return value.data
-    handleGlobalError(new AppError(value.error))
-    throw new Error(value.error.message)
-  }
-  return value
-}
+/** Grid 는 행 배열(T[]) 도메인이므로 표준 DataSource 를 T[] 로 특수화한다. */
+type DataSource<T extends object = Row> = BaseDataSource<T[]>
 
 interface GridColumn {
   name: string
@@ -206,22 +189,19 @@ function GridContent({
   // }, [dataSource]) as Row[] | Promise<Row[]>
 
   // [수정] useRef는 suspend 재시도에서도 유지되므로 동일 Promise 참조를 보장
-  const resourceRef = useRef<{ key: unknown; value: Row[] | Promise<Row[]> }>({ key: undefined, value: [] })
+  // resolveDataSource: 값/Promise/함수/envelope 어떤 형태든 Promise<Row[]> 로 정규화.
+  // 실패 시 내부에서 handleGlobalError 호출 + AppError throw → Suspense 외곽 ErrorBoundary 로 전파.
+  const resourceRef = useRef<{ key: unknown; value: Promise<Row[]> }>({
+    key: undefined,
+    value: Promise.resolve([]),
+  })
   if (resourceRef.current.key !== dataSource) {
-    const raw: Row[] | Promise<Row[] | ActionResponse<Row[]>> =
-      typeof dataSource === 'function'
-        // Server Action은 렌더 중 호출 시 Router setState 경고 발생 → microtask로 지연
-        ? Promise.resolve().then(() => dataSource() as Row[] | Promise<Row[] | ActionResponse<Row[]>>)
-        : (dataSource as Row[] | Promise<Row[] | ActionResponse<Row[]>>)
-
     resourceRef.current = {
       key: dataSource,
-      // envelope 이면 언래핑, 아니면 그대로. 실패 시 throw → Suspense 외곽 ErrorBoundary 로 전파.
-      value: raw instanceof Promise ? raw.then(unwrapEnvelope) : raw,
+      value: resolveDataSource(dataSource),
     }
   }
-  const resource = resourceRef.current.value
-  const data: Row[] = resource instanceof Promise ? use(resource) : resource
+  const data: Row[] = use(resourceRef.current.value)
 
   const resolvedColumns = useMemo(
     () => columnsProp ?? deriveColumns(data),

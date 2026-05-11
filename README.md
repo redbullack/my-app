@@ -706,4 +706,34 @@ pnpm type-check
 
 ---
 
+## 🆕 최근 변경 사항 (Recent Changes)
+
+### Multi-DB Provider 확장 & dataSource 정규화 헬퍼 도입
+
+**DB 레이어 (`lib/db/`)**
+- `ProviderName` union 에 `postgres`, `mssql` 을 추가하여 멀티 DB 백엔드를 지원한다.
+  - `lib/db/providers/postgres.ts` — `pg` 드라이버 기반 PostgreSQL 프로바이더 신규 추가.
+  - `lib/db/providers/mssql.ts` — `mssql` 드라이버 기반 SQL Server 프로바이더 신규 추가.
+  - `lib/db/providers/index.ts` 의 프로바이더 레지스트리에 위 두 항목 등록.
+- `lib/db/errors.ts` 에 DB 별 에러 분류기 추가:
+  - `categorizePostgresError()` — PostgreSQL **SQLSTATE 5자리** 코드와 Node 네트워크 errno(`ECONNREFUSED` 등) 를 함께 처리하여 `DbErrorCategory`(`connection` / `timeout` / `constraint` / `permission` / `syntax` / `unknown`) 로 매핑.
+  - `categorizeMssqlError()` — mssql 드라이버의 `.code`(`ELOGIN`, `ETIMEOUT`, `ESOCKET` 등) 와 SQL Server native `.number`(2627, 547, 18456, 1205 …) 를 함께 매핑.
+- 신규 의존성: `pg` / `@types/pg`, `mssql` / `@types/mssql`.
+
+**공용 컴포넌트 데이터 소스 표준화 (`lib/utils/client/`)**
+- `lib/utils/client/unwrapEnvelope.ts` 모듈 신규 추가.
+  - `DataSource<T>` 표준 타입: 동기 값 / `Promise` / 무인자 함수 / `ActionResponse<T>` envelope 포함 형태를 모두 허용.
+  - `resolveDataSource(src)` — 어떤 형태의 입력이든 `Promise<T>` 로 정규화. Server Action 함수가 렌더 중 직접 호출되는 경우의 Router setState 경고를 피하기 위해 microtask 로 한 박자 지연 호출.
+  - `unwrapEnvelope(value)` — `ActionResponse` 실패 시 `ActionError → AppError` 복원 후 `handleGlobalError()` 1회 호출 + `AppError` throw → 컴포넌트 외곽 `ErrorBoundary` 로 전파.
+  - `isActionResponse(v)` 타입 가드.
+- `lib/utils/client/index.ts` 배럴에서 위 항목들을 re-export.
+
+**Grid 컴포넌트 (`components/control/Grid.tsx`)**
+- 내부에서 직접 구현하던 envelope 언래핑 / Promise 정규화 로직 제거 → `resolveDataSource()` 1줄로 대체.
+- `DataSource<T>` 는 표준 `DataSource<T[]>` 로 특수화하여 정의.
+- `useRef` 캐시 값을 `Promise<Row[]>` 로 통일 → `use()` 분기 코드 제거로 가독성 개선.
+- 동작은 동일하지만, 다른 공용 컨트롤(InputSelect, Chart 등) 도 동일한 1-stop API 를 재사용할 수 있는 기반을 마련.
+
+---
+
 이 프로젝트를 통해 Next.js 16의 모든 라우팅 패턴을 **직접 구현하고 동작을 관찰**하며 깊이 있게 학습할 수 있습니다.

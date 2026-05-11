@@ -6,10 +6,14 @@
  */
 
 import type { IDbProvider, ProviderName } from '../types'
+import { mssqlProvider } from './mssql'
 import { oracleProvider } from './oracle'
+import { postgresProvider } from './postgres'
 
 const providers: Record<ProviderName, IDbProvider> = {
   oracle: oracleProvider,
+  postgres: postgresProvider,
+  mssql: mssqlProvider,
 }
 
 export function getProvider(name: ProviderName): IDbProvider {

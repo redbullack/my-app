@@ -121,3 +121,155 @@ function matchOraNumber(msg: string): number | undefined {
   const m = /ORA-(\d{4,5})/.exec(msg)
   return m ? Number(m[1]) : undefined
 }
+
+/**
+ * PostgreSQL 에러 객체에서 카테고리/코드를 추출.
+ *
+ * pg 드라이버는 서버에서 던진 에러에 5자리 SQLSTATE 를 `.code` 로 담아준다
+ * (예: '23505' unique_violation). 네트워크/소켓 단계 에러는 SQLSTATE 가 아닌
+ * Node 의 errno 문자열(ECONNREFUSED 등) 이 같은 `.code` 필드에 들어오므로 함께 처리한다.
+ *
+ * SQLSTATE 분류 기준은 PostgreSQL 매뉴얼 Appendix A 의 클래스 코드를 따른다:
+ *   - 08: connection_exception
+ *   - 23: integrity_constraint_violation
+ *   - 28: invalid_authorization_specification
+ *   - 42: syntax_error_or_access_rule_violation (단 42501 은 권한)
+ *   - 53: insufficient_resources
+ *   - 57014: query_canceled  (statement_timeout 발동 시)
+ */
+export function categorizePostgresError(err: unknown): {
+  category: DbErrorCategory
+  code?: string
+} {
+  const e = err as { code?: string; message?: string } | null
+  if (!e) return { category: 'unknown' }
+
+  const code = typeof e.code === 'string' ? e.code : undefined
+  if (!code) return { category: 'unknown' }
+
+  // Node 네트워크 errno — pg 가 접속 단계 실패 시 그대로 노출.
+  if (
+    code === 'ECONNREFUSED' ||
+    code === 'ENOTFOUND' ||
+    code === 'EHOSTUNREACH' ||
+    code === 'ETIMEDOUT' ||
+    code === 'ECONNRESET' ||
+    code === 'EPIPE'
+  ) {
+    return { category: 'connection', code }
+  }
+
+  // 명시적 timeout / cancel
+  if (code === '57014') return { category: 'timeout', code } // query_canceled
+
+  // 권한: 일반적인 syntax 클래스(42) 안에 있지만 의미는 권한이라 먼저 분기.
+  if (code === '42501') return { category: 'permission', code } // insufficient_privilege
+
+  const cls = code.slice(0, 2)
+  switch (cls) {
+    case '08': // connection_exception
+      return { category: 'connection', code }
+    case '23': // integrity_constraint_violation
+      return { category: 'constraint', code }
+    case '28': // invalid_authorization_specification (28000, 28P01 등)
+      return { category: 'permission', code }
+    case '42': // syntax_error_or_access_rule_violation (42501 은 위에서 처리됨)
+      return { category: 'syntax', code }
+    case '53': // insufficient_resources — 풀 고갈/메모리/디스크. 운영 관점에서 connection 으로 묶음.
+      return { category: 'connection', code }
+    case '3D': // invalid_catalog_name
+    case '3F': // invalid_schema_name
+      return { category: 'syntax', code }
+    default:
+      return { category: 'unknown', code }
+  }
+}
+
+/**
+ * SQL Server(mssql 드라이버) 에러 객체에서 카테고리/코드를 추출.
+ *
+ * mssql 은 에러에 다음 두 종류의 식별자를 채워준다:
+ *   - `.number` : SQL Server 가 보낸 native 에러 번호 (예: 2627 unique violation).
+ *   - `.code`   : 드라이버 단계 분류 문자열 (예: 'ELOGIN', 'ETIMEOUT', 'ESOCKET').
+ *
+ * native error number 매핑은 SQL Server 의 sys.messages 기준이며,
+ * 자주 마주치는 코드만 분류한다. 나머지는 'unknown'.
+ */
+export function categorizeMssqlError(err: unknown): {
+  category: DbErrorCategory
+  code?: string
+} {
+  const e = err as { number?: number; code?: string; message?: string } | null
+  if (!e) return { category: 'unknown' }
+
+  const driverCode = typeof e.code === 'string' ? e.code : undefined
+
+  // 1) 드라이버 단계 코드 — native number 가 채워지기 전 단계의 실패들.
+  if (driverCode) {
+    switch (driverCode) {
+      case 'ELOGIN':           // 로그인 실패
+        return { category: 'permission', code: driverCode }
+      case 'ETIMEOUT':         // 쿼리/연결 타임아웃
+      case 'ERequestPending':
+        return { category: 'timeout', code: driverCode }
+      case 'ECONNCLOSED':
+      case 'ESOCKET':
+      case 'ENOTOPEN':
+      case 'ECONNRESET':
+      case 'ECONNREFUSED':
+      case 'EINSTLOOKUP':      // SQL Browser 로 instance lookup 실패
+      case 'ENOTFOUND':
+        return { category: 'connection', code: driverCode }
+    }
+  }
+
+  const num = typeof e.number === 'number' ? e.number : undefined
+  const code = num !== undefined ? `MSSQL-${num}` : driverCode
+
+  // 2) SQL Server native error number 매핑.
+  switch (num) {
+    // constraint 위반
+    case 2627:   // unique constraint
+    case 2601:   // unique index
+    case 547:    // FK / CHECK constraint
+    case 515:    // NOT NULL
+      return { category: 'constraint', code }
+
+    // syntax / object missing
+    case 102:    // 일반 syntax
+    case 103:    // 식별자 too long
+    case 156:    // keyword 근처 syntax
+    case 207:    // invalid column name
+    case 208:    // invalid object name (테이블/뷰 없음)
+    case 4104:   // multi-part identifier could not be bound
+    case 8152:   // truncation (구버전에서 syntax 분류로 보내는 편이 디버깅 단서가 됨)
+      return { category: 'syntax', code }
+
+    // permission / auth
+    case 229:    // permission denied on object
+    case 230:    // permission denied on column
+    case 262:    // permission denied (statement-level)
+    case 916:    // db access denied
+    case 18456:  // login failed
+      return { category: 'permission', code }
+
+    // connection
+    case 233:    // pre-login handshake 실패
+    case 4060:   // cannot open database
+    case 10054:  // existing connection forcibly closed
+    case 10060:  // connection attempt failed
+    case 10061:  // no connection — actively refused
+    case 40197:  // azure: transient
+    case 40501:  // azure: server busy
+    case 40613:  // azure: db unavailable
+      return { category: 'connection', code }
+
+    // timeout / cancel / deadlock
+    case 1205:   // deadlock victim — 운영 관점 retry 대상이라 timeout 으로 묶음
+    case -2:     // 일부 환경에서 number=-2 로 driver timeout 노출
+      return { category: 'timeout', code }
+
+    default:
+      return { category: 'unknown', code }
+  }
+}
