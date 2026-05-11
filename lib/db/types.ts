@@ -6,7 +6,7 @@
  */
 
 /** 지원하는 DB 프로바이더. 신규 프로바이더 추가 시 여기 union 확장. */
-export type ProviderName = 'oracle' // | 'postgres' | 'mariadb'
+export type ProviderName = 'oracle' | 'postgres' | 'mssql' // | 'odbc'
 
 /**
  * 바인드 파라미터.
