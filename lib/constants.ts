@@ -22,6 +22,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'NewSearch', href: '/new-search', description: 'dataSource + ServerAction + Tab' },
   { label: 'test-0409', href: '/test-0409', description: 'Grid + Promise<T[]> + Suspense' },
   { label: 'test-0419', href: '/test-0419', description: 'Transaction Test' },
+  { label: 'test-0512', href: '/test-0512', description: 'test-0512' },
 ]
 
 /** 샘플 블로그 데이터 */

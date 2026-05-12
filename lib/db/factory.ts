@@ -38,6 +38,8 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { randomUUID } from 'node:crypto'
+import dayjs from 'dayjs'
+import utc from 'dayjs/plugin/utc'
 import { getRequestContext } from '@/lib/utils/server/requestContext'
 import { DbError } from './errors'
 import { getDbLogger } from './logger'
@@ -50,6 +52,15 @@ import type {
   ProviderName,
   QueryOptions,
 } from './types'
+
+dayjs.extend(utc)
+
+// 로그 타임스탬프를 KST(+09:00) ISO 문자열로 포맷. Date#toISOString 은 항상 UTC(Z) 라
+// 한국 시각과 9시간 차이가 나서 로그 가독성이 떨어지므로 dayjs 로 고정 오프셋을 적용한다.
+const KST_OFFSET_MIN = 9 * 60
+function kstIso(ms: number): string {
+  return dayjs(ms).utcOffset(KST_OFFSET_MIN).format('YYYY-MM-DDTHH:mm:ss.SSSZ')
+}
 
 interface TxState {
   /** 이 tx 스코프가 속한 DB 이름. 다른 DB 호출 차단을 위해 사용. */
@@ -126,7 +137,7 @@ async function withLifecycle<R>(
   const traceId = randomUUID()
   const log = getDbLogger()
   const start = Date.now()
-  const startedAt = new Date(start).toISOString()
+  const startedAt = kstIso(start)
 
   // 요청 컨텍스트(ALS) — actionAgent 에서 주입된 세션/액션/페이지 정보.
   // 스코프 바깥에서 호출되는 경우(예: warmup) 빈 객체로 안전하게 동작.
@@ -162,7 +173,7 @@ async function withLifecycle<R>(
   try {
     const result = await run(traceId)
     const end = Date.now()
-    const endedAt = new Date(end).toISOString()
+    const endedAt = kstIso(end)
     const durationMs = end - start
     log.info('db.ok', {
       db: args.dbName,
@@ -182,7 +193,7 @@ async function withLifecycle<R>(
     return result
   } catch (err) {
     const end = Date.now()
-    const endedAt = new Date(end).toISOString()
+    const endedAt = kstIso(end)
     const durationMs = end - start
 
     if (err instanceof DbError) {

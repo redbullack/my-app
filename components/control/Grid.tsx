@@ -24,12 +24,17 @@ import {
   resolveDataSource,
   type DataSource as BaseDataSource,
 } from '@/lib/utils/client'
+import type { QueryResult } from '@/lib/db'
 
 /* ── 타입 ── */
 
 type Row = Record<string, unknown>
-/** Grid 는 행 배열(T[]) 도메인이므로 표준 DataSource 를 T[] 로 특수화한다. */
-type DataSource<T extends object = Row> = BaseDataSource<T[]>
+/**
+ * Grid 는 DB 조회 결과(`QueryResult<T>` = `{ columns, rows }`) 도메인이다.
+ * 서버 액션이 `db.query(...)` 결과를 그대로 반환하면 Grid 가 곧바로 흡수할 수 있도록
+ * 표준 DataSource 를 `QueryResult<T>` 로 특수화한다.
+ */
+type DataSource<T extends object = Row> = BaseDataSource<QueryResult<T>>
 
 interface GridColumn {
   name: string
@@ -100,9 +105,45 @@ function GridSkeleton({
   )
 }
 
+/* ── dataSource Promise 캐시 ──
+ * 함수형 dataSource는 첫 호출 시 만든 Promise를 모듈 스코프 WeakMap에 보관한다.
+ * 컴포넌트가 첫 마운트에서 suspend되어 useRef가 폐기되더라도, retry 시 같은 함수 참조에
+ * 대해 동일 Promise를 돌려주므로 무한 재호출이 발생하지 않는다.
+ * WeakMap이라 dataSource 함수가 GC되면 캐시도 자동 해제된다.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const promiseCache = new WeakMap<object, Promise<QueryResult<any>>>()
+
+function getCachedResource(dataSource: unknown): Promise<QueryResult<Row>> {
+  if (typeof dataSource === 'function') {
+    const key = dataSource as unknown as object
+    const hit = promiseCache.get(key)
+    if (hit) return hit as Promise<QueryResult<Row>>
+    const p = resolveDataSource(dataSource as never) as Promise<QueryResult<Row>>
+    promiseCache.set(key, p)
+    return p
+  }
+  return resolveDataSource(dataSource as never) as Promise<QueryResult<Row>>
+}
+
 /* ── 컬럼 자동 추론 ── */
 
-function deriveColumns(rows: Row[]): GridColumn[] {
+function deriveColumns(
+  metaColumns: QueryResult['columns'] | undefined,
+  rows: Row[],
+): GridColumn[] {
+  // 1순위: QueryResult.columns 메타가 있으면 그대로 사용 (빈 결과셋도 컬럼 헤더 보존)
+  if (metaColumns && metaColumns.length > 0) {
+    return metaColumns.map(c => ({
+      name: c.name,
+      header: c.name,
+      sortable: true,
+      resizable: true,
+      align: c.type === 'number' ? 'right' : c.type === 'date' ? 'center' : 'left',
+    }))
+  }
+  // 2순위: 첫 행 키로 추론
   if (rows.length === 0) return []
   return Object.keys(rows[0]).map(key => ({
     name: key,
@@ -191,21 +232,22 @@ function GridContent({
   // [수정] useRef는 suspend 재시도에서도 유지되므로 동일 Promise 참조를 보장
   // resolveDataSource: 값/Promise/함수/envelope 어떤 형태든 Promise<Row[]> 로 정규화.
   // 실패 시 내부에서 handleGlobalError 호출 + AppError throw → Suspense 외곽 ErrorBoundary 로 전파.
-  const resourceRef = useRef<{ key: unknown; value: Promise<Row[]> }>({
+  const resourceRef = useRef<{ key: unknown; value: Promise<QueryResult<Row>> }>({
     key: undefined,
-    value: Promise.resolve([]),
+    value: Promise.resolve({ columns: [], rows: [] }),
   })
   if (resourceRef.current.key !== dataSource) {
     resourceRef.current = {
       key: dataSource,
-      value: resolveDataSource(dataSource),
+      value: getCachedResource(dataSource),
     }
   }
-  const data: Row[] = use(resourceRef.current.value)
+  const result: QueryResult<Row> = use(resourceRef.current.value)
+  const data: Row[] = result.rows
 
   const resolvedColumns = useMemo(
-    () => columnsProp ?? deriveColumns(data),
-    [columnsProp, data],
+    () => columnsProp ?? deriveColumns(result.columns, data),
+    [columnsProp, result.columns, data],
   )
 
   // sortable prop을 개별 컬럼에 반영
