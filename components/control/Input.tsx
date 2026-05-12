@@ -12,7 +12,7 @@ import { useState, useRef, useEffect, useCallback, useTransition } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { cn, type ActionResponse } from '@/lib/utils'
 import type { SelectOption } from '@/types'
-import { handleGlobalError } from '@/lib/utils/client/globalErrorHandler'
+import { resolveDataSource } from '@/lib/utils/client/unwrapEnvelope'
 
 type InputType = 'text' | 'password' | 'email' | 'number' | 'search' | 'select'
 
@@ -26,22 +26,6 @@ export type DataSourceFn =
   | (() => Promise<string[]>)
   | (() => Promise<ActionResponse<SelectOption[]>>)
   | (() => Promise<ActionResponse<string[]>>)
-
-type SelectSource = SelectOption[] | string[]
-
-function isActionResponse<T>(v: unknown): v is ActionResponse<T> {
-  return typeof v === 'object' && v !== null && 'isSuccess' in v
-}
-
-/** envelope 이면 언래핑, 아니면 그대로. 실패 시 전역 핸들러 호출 후 빈 배열. */
-function unwrapSelectSource(v: SelectSource | ActionResponse<SelectSource>): SelectSource {
-  if (isActionResponse<SelectSource>(v)) {
-    if (v.isSuccess) return v.data
-    handleGlobalError(v.error)
-    return []
-  }
-  return v
-}
 
 /** Input에 직접 넘길 수 있는 dataSource의 모든 형태 */
 export type DataSource = SelectOption[] | string[] | DataSourceFn
@@ -231,11 +215,14 @@ function InputSelect({
     if (isDataSourceFn && fetchedFnRef.current !== dataSource) {
       const fn = dataSource as DataSourceFn
       startFetchTransition(async () => {
-        const raw = await fn()
-        /* envelope 이면 언래핑 → 실패 시 전역 토스트 후 빈 배열 */
-        const result = unwrapSelectSource(raw)
-        setResolvedOptions(normalizeOptions(result))
-        fetchedFnRef.current = fn
+        /* envelope 이면 언래핑 → 실패 시 resolveDataSource 내부에서 전역 토스트 후 throw */
+        try {
+          const result = await resolveDataSource<SelectOption[] | string[]>(fn)
+          setResolvedOptions(normalizeOptions(result))
+          fetchedFnRef.current = fn
+        } catch {
+          setResolvedOptions([])
+        }
       })
     }
   }, [value, isDataSourceFn, dataSource])

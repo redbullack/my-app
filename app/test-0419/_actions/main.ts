@@ -8,7 +8,7 @@
  * - runTxRollback: db.tx() 내에서 UPDATE 후 고의 throw → rollback 검증
  */
 
-import { getDb } from '@/lib/db'
+import { getDb, type QueryResult } from '@/lib/db'
 import { actionAgent } from '@/lib/utils/server'
 
 const db = getDb('MAIN')
@@ -32,9 +32,8 @@ const SELECT_EMP = `
 `
 
 export const fetchEmpSimple = async () =>
-  actionAgent('fetchEmpSimple', async (): Promise<EmpSimpleRow[]> => {
-    const result = await db.query<EmpSimpleRow>(SELECT_EMP)
-    return result.rows
+  actionAgent('fetchEmpSimple', async (): Promise<QueryResult<EmpSimpleRow>> => {
+    return await db.query<EmpSimpleRow>(SELECT_EMP)
   })
 
 /* ────────────────────────────────────────────────

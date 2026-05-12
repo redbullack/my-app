@@ -15,6 +15,7 @@ import type { GridColumn } from '@/components/control/Grid'
 import RouteInfo from '@/components/shared/RouteInfo'
 import type { ActionResponse } from '@/lib/utils'
 import { useAction } from '@/lib/utils/client'
+import type { QueryResult } from '@/lib/db'
 import { toast } from '@/components/control/Toast'
 import {
   fetchEmpSimple,
@@ -35,7 +36,9 @@ const columns: GridColumn[] = [
 export default function Test0419Page() {
   const { execute } = useAction()
   // const [rows, setRows] = useState<EmpSimpleRow[]>([])
-  const [rows, setRows] = useState<EmpSimpleRow[] | (() => Promise<ActionResponse<EmpSimpleRow[]>>)>([])
+  const [rows, setRows] = useState<
+    QueryResult<EmpSimpleRow> | (() => Promise<ActionResponse<QueryResult<EmpSimpleRow>>>)
+  >({ columns: [], rows: [] })
   const [empnoA, setEmpnoA] = useState('10000')
   const [empnoB, setEmpnoB] = useState('10001')
   const [delta, setDelta] = useState('1')
