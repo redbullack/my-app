@@ -27,8 +27,8 @@ import { ActionResponse } from '@/lib/utils'
 
 export default function Test0512Page() {
   const [cond, setCond] = useState<EmpSearchCond>({ job: [], empno: [], ename: [] })
-  // const [gridDataSource, setGridDataSource] = useState<QueryResult<EmpRow> | (() => ReturnType<typeof fetchEmpList>)>({ columns: [], rows: [] })
-  const [gridDataSource, setGridDataSource] = useState<QueryResult<EmpRow> | (() => Promise<ActionResponse<QueryResult<EmpRow>>>)>({ columns: [], rows: [] })
+  const [gridDataSource, setGridDataSource] = useState<QueryResult<EmpRow> | (() => ReturnType<typeof fetchEmpList>)>({ columns: [], rows: [] })
+  // const [gridDataSource, setGridDataSource] = useState<QueryResult<EmpRow> | (() => Promise<ActionResponse<QueryResult<EmpRow>>>)>({ columns: [], rows: [] })
 
   const jobDataSource = useCallback(() => fetchJobOptions(), [])
   const empnoDataSource = useMemo(() => fetchEmpnoOptions.bind(null, cond.job), [cond.job])

@@ -25,23 +25,7 @@
  *     postgres 처럼 SQL 토크나이징이 필요 없다. 배열 binds 는 `_p0, _p1, ...` 이름으로
  *     자동 등록되며, 호출자는 SQL 에 `@_p0` 형태로 작성한다.
  *
- *  4) **per-query timeout 은 native**
- *     `request.timeout = ms` 로 쿼리 단위 제한을 지원한다. `SET` SQL 트릭이 필요 없다.
- *
- *  5) **destroy(drop) 한계**
- *     mssql 은 풀에서 특정 conn 을 evict 하는 public API 가 없다. tx 안전망(in-flight
- *     누락 / aborted) 이 발동되었을 때 oracle/pg 처럼 conn 을 강제로 폐기할 수 없으므로,
- *     차선으로 `tx.rollback()` 을 best-effort 로 호출해 풀에 conn 을 돌려보낸다.
- *     "in-flight 가 다음 사용자 conn 에 묻어가는" 류의 cross-request 누수 위험은
- *     oracle 보다 작지만(매 쿼리가 새 Request 인스턴스 단위로 격리되어 driver-level 에서
- *     서로 다른 conn 로 라우팅되기 때문), 그래도 0 은 아니다. 사용자는 본 어댑터를
- *     쓸 때 tx 콜백 안에서 await 누락이 없도록 더더욱 주의해야 한다.
- *
- *  6) **maxRows: JS 사이드 slice**
- *     mssql 의 표준 `request.query()` 는 maxRows 옵션이 없다. 큰 결과는 streaming API
- *     로 잘라야 하지만 본 어댑터에서는 정직한 semantics 를 위해 JS 사이드에서 slice 한다.
- *
- *  7) **encrypt 기본값**
+ *  4) **encrypt 기본값**
  *     mssql v10+ 는 기본 `encrypt:true` 라서 self-signed 인증서를 쓰는 사내망 DB 에서는
  *     `trustServerCertificate:true` 가 없으면 접속이 실패한다. 본 어댑터는
  *     `encrypt: true, trustServerCertificate: true` 를 기본으로 둔다 — 사내 운영 환경의
@@ -57,12 +41,11 @@ import type {
   ExecuteResult,
   IDbProvider,
   PoolOptions,
-  InternalQueryOptions,
+  QueryOptions,
   QueryResult,
   ResolvedDsn,
 } from '../types'
-import { DbError, categorizeMssqlError } from '../errors'
-import { getDbLogger } from '../logger'
+// import { getDbLogger } from '../logger'
 
 /* ─── 풀 캐시 ──────────────────────────────────────────────────────── */
 
@@ -87,18 +70,12 @@ function parseMssqlLocation(connectString: string): {
 } {
   const slash = connectString.lastIndexOf('/')
   if (slash < 0) {
-    throw new DbError({
-      category: 'config',
-      devMessage: `Mssql connectString 형식 오류 — '/database' 가 없습니다: ${connectString}`,
-    })
+    throw new Error(`Mssql connectString 형식 오류 — '/database' 가 없습니다: ${connectString}`)
   }
   const hostPort = connectString.slice(0, slash)
   const database = connectString.slice(slash + 1)
   if (!database) {
-    throw new DbError({
-      category: 'config',
-      devMessage: `Mssql connectString 의 database 가 비어있습니다: ${connectString}`,
-    })
+    throw new Error(`Mssql connectString 의 database 가 비어있습니다: ${connectString}`)
   }
 
   const colon = hostPort.lastIndexOf(':')
@@ -112,18 +89,12 @@ function parseMssqlLocation(connectString: string): {
     const portStr = hostPort.slice(colon + 1)
     const parsed = Number.parseInt(portStr, 10)
     if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 65535) {
-      throw new DbError({
-        category: 'config',
-        devMessage: `Mssql connectString 의 port 가 잘못되었습니다: ${portStr}`,
-      })
+      throw new Error(`Mssql connectString 의 port 가 잘못되었습니다: ${portStr}`)
     }
     port = parsed
   }
   if (!server) {
-    throw new DbError({
-      category: 'config',
-      devMessage: `Mssql connectString 의 server 가 비어있습니다: ${connectString}`,
-    })
+    throw new Error(`Mssql connectString 의 server 가 비어있습니다: ${connectString}`)
   }
   return { server, port, database }
 }
@@ -214,7 +185,7 @@ async function getPool(
   const existing = store.get(dbName)
   if (existing) return existing
 
-  const log = getDbLogger()
+  // const log = getDbLogger()
   const { server, port, database } = parseMssqlLocation(dsn.connectString)
 
   // mssql 의 ConnectionPool 은 생성 시점에는 idle, `connect()` 호출 시 실제 풀이 채워진다.
@@ -251,7 +222,7 @@ async function getPool(
       // 풀 단위 'error' 이벤트 — idle conn 이 서버 측에서 끊겼을 때 발생.
       // 처리하지 않으면 Node 가 프로세스를 종료시킬 수 있어 listener 부착 필수.
       p.on('error', (err) => {
-        log.error('pool.idle_error', {
+        console.error('pool.idle_error', {
           db: dbName,
           provider: 'mssql',
           cause: err instanceof Error ? err.message : String(err),
@@ -260,7 +231,7 @@ async function getPool(
 
       await p.connect()
 
-      log.info('pool.created', {
+      console.info('pool.created', {
         db: dbName,
         provider: 'mssql',
         min: pool?.min ?? 1,
@@ -271,13 +242,7 @@ async function getPool(
     } catch (err) {
       // 실패 시 캐시에서 제거 → 다음 호출에 재시도 가능.
       store.delete(dbName)
-      const { category, code } = categorizeMssqlError(err)
-      throw new DbError({
-        category: category === 'unknown' ? 'connection' : category,
-        code,
-        cause: err,
-        devMessage: `Mssql 풀 생성 실패 (db=${dbName})`,
-      })
+      throw err
     }
   })()
 
@@ -286,17 +251,6 @@ async function getPool(
 }
 
 /* ─── 공통 실행 헬퍼 ─────────────────────────────────────────────── */
-
-function toDbError(err: unknown, dbName: string, traceId: string | undefined): DbError {
-  const { category, code } = categorizeMssqlError(err)
-  return new DbError({
-    category,
-    code,
-    traceId,
-    cause: err,
-    devMessage: `Mssql 쿼리 실패 (db=${dbName})`,
-  })
-}
 
 /**
  * `new sql.Request(parent, overrides)` 의 2번째 인자(`requestTimeout`) 는 mssql 런타임은
@@ -319,22 +273,10 @@ async function runRequest(
   parent: sql.ConnectionPool | sql.Transaction,
   sqlText: string,
   binds: BindParams,
-  opts: InternalQueryOptions,
 ): Promise<sql.IResult<Record<string, unknown>>> {
-  const overrides =
-    typeof opts.timeoutMs === 'number' && opts.timeoutMs > 0
-      ? { requestTimeout: opts.timeoutMs }
-      : undefined
-  const request = new RequestWithOverrides(parent, overrides)
+  const request = new RequestWithOverrides(parent)
   applyBinds(request, binds)
   return request.query<Record<string, unknown>>(sqlText)
-}
-
-function sliceRows<T>(rows: T[], maxRows: number | undefined): T[] {
-  if (typeof maxRows === 'number' && maxRows >= 0 && rows.length > maxRows) {
-    return rows.slice(0, maxRows)
-  }
-  return rows
 }
 
 function totalRowsAffected(result: sql.IResult<unknown>): number {
@@ -352,28 +294,20 @@ async function mssqlQuery<T>(
   pool: PoolOptions | undefined,
   sqlText: string,
   binds: BindParams,
-  opts: InternalQueryOptions,
+  opts: QueryOptions,
 ): Promise<QueryResult<T>> {
   // 트랜잭션 컨텍스트에서 전달된 Transaction 위에서 실행.
   if (opts.conn) {
     const tx = opts.conn as sql.Transaction
-    try {
-      const result = await runRequest(tx, sqlText, binds, opts)
-      const rows = sliceRows(result.recordset ?? [], opts.maxRows) as unknown as T[]
-      return { columns: toColumns(result.recordset?.columns), rows }
-    } catch (err) {
-      throw toDbError(err, dbName, opts.traceId)
-    }
+    const result = await runRequest(tx, sqlText, binds)
+    const rows = (result.recordset ?? []) as unknown as T[]
+    return { columns: toColumns(result.recordset?.columns), rows }
   }
 
   const p = await getPool(dbName, dsn, pool)
-  try {
-    const result = await runRequest(p, sqlText, binds, opts)
-    const rows = sliceRows(result.recordset ?? [], opts.maxRows) as unknown as T[]
-    return { columns: toColumns(result.recordset?.columns), rows }
-  } catch (err) {
-    throw toDbError(err, dbName, opts.traceId)
-  }
+  const result = await runRequest(p, sqlText, binds)
+  const rows = (result.recordset ?? []) as unknown as T[]
+  return { columns: toColumns(result.recordset?.columns), rows }
 }
 
 async function mssqlExecute<T>(
@@ -382,27 +316,19 @@ async function mssqlExecute<T>(
   pool: PoolOptions | undefined,
   sqlText: string,
   binds: BindParams,
-  opts: InternalQueryOptions,
+  opts: QueryOptions,
 ): Promise<ExecuteResult<T>> {
   if (opts.conn) {
     const tx = opts.conn as sql.Transaction
-    try {
-      const result = await runRequest(tx, sqlText, binds, opts)
-      const rows = sliceRows(result.recordset ?? [], opts.maxRows) as unknown as T[]
-      return { rows, rowsAffected: totalRowsAffected(result) }
-    } catch (err) {
-      throw toDbError(err, dbName, opts.traceId)
-    }
+    const result = await runRequest(tx, sqlText, binds)
+    const rows = (result.recordset ?? []) as unknown as T[]
+    return { rows, rowsAffected: totalRowsAffected(result) }
   }
 
   const p = await getPool(dbName, dsn, pool)
-  try {
-    const result = await runRequest(p, sqlText, binds, opts)
-    const rows = sliceRows(result.recordset ?? [], opts.maxRows) as unknown as T[]
-    return { rows, rowsAffected: totalRowsAffected(result) }
-  } catch (err) {
-    throw toDbError(err, dbName, opts.traceId)
-  }
+  const result = await runRequest(p, sqlText, binds)
+  const rows = (result.recordset ?? []) as unknown as T[]
+  return { rows, rowsAffected: totalRowsAffected(result) }
 }
 
 /**
@@ -418,12 +344,8 @@ async function mssqlAcquireTxConnection(
 ): Promise<unknown> {
   const p = await getPool(dbName, dsn, pool)
   const tx = new sql.Transaction(p)
-  try {
-    await tx.begin()
-    return tx
-  } catch (err) {
-    throw toDbError(err, dbName, undefined)
-  }
+  await tx.begin()
+  return tx
 }
 
 async function mssqlCommit(conn: unknown): Promise<void> {
@@ -440,26 +362,6 @@ async function mssqlRollback(conn: unknown): Promise<void> {
  */
 async function mssqlRelease(_conn: unknown): Promise<void> {
   /* mssql 은 commit/rollback 시점에 자동 release. 본 훅에서는 별도 작업 없음. */
-}
-
-/**
- * tx 안전망(await 누락 / aborted) 발동 시 호출되는 destroy.
- *
- * mssql 은 풀에서 특정 conn 을 evict 하는 public API 가 없다. 차선으로:
- *  1) 가능하면 rollback 을 best-effort 로 호출 — 내부 conn 을 풀에 돌려보낸다.
- *  2) 이미 commit/rollback 된 tx 위에서 호출되면 rollback 이 throw 하므로 swallow.
- *
- * 풀에 돌아간 conn 이 손상되어 있다면 다음 사용자의 첫 쿼리에서 실패하면서 mssql
- * 풀이 해당 conn 을 교체한다 — oracle/pg 만큼 즉각적이지는 않지만, 데이터 정합성은
- * 트랜잭션 자체가 rollback 되었으므로 보존된다.
- */
-async function mssqlDestroy(conn: unknown): Promise<void> {
-  const tx = conn as sql.Transaction
-  try {
-    await tx.rollback()
-  } catch {
-    /* 이미 commit/rollback 됐거나 그 외 — swallow. */
-  }
 }
 
 /**
@@ -510,7 +412,6 @@ export const mssqlProvider: IDbProvider = {
   commit: mssqlCommit,
   rollback: mssqlRollback,
   release: mssqlRelease,
-  destroy: mssqlDestroy,
   warmup: mssqlWarmup,
   closePool: mssqlClosePool,
   closeAll: mssqlCloseAll,
