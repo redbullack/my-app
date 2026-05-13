@@ -38,17 +38,18 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { inspect } from 'node:util'
 import dayjs from 'dayjs'
 import utc from 'dayjs/plugin/utc'
-import { getRequestCtx } from '@/lib/utils/server/requestContext'
 import { insertLogQuery, loggingScope } from './logger'
 import { closeAllProviders, getProvider } from './providers'
 import { resolveFromEnv } from './resolvers/env'
 import type {
   BindParams,
   IDbClient,
-  ProviderName,
 } from './types'
 
 dayjs.extend(utc)
+
+// raw 에러 전체(메시지/스택/driver code/cause 체인) 를 한 줄 텍스트로 직렬화.
+// String(err) → "Error: 메시지" 만, JSON.stringify(err) → 빈 객체 {} 라서 inspect 사용.
 
 interface TxState {
   /** 이 transaction 스코프가 속한 DB 이름. 다른 DB 호출 차단을 위해 사용. */
@@ -59,44 +60,6 @@ interface TxState {
 
 const txStore = new AsyncLocalStorage<TxState>()
 const clientCache = new Map<string, IDbClient>()
-
-/**
- * 한 번의 query/execute 결과를 로그 테이블에 적재한다.
- *  - 성공/실패 한 함수로 통합: `outcome.err` 이 있으면 logger 가 STATUS='FAIL' 로 찍는다.
- *  - 로그 INSERT 자체에서 다시 호출되면(`loggingScope` 플래그 ON) 즉시 skip 하여 재귀 방지.
- *  - `getRequestCtx()` 호출도 skip 분기 안에 두어, 재귀 케이스에서는 부가 비용 0.
- */
-async function logDb(
-  args: {
-    db: string
-    provider: ProviderName
-    op: 'query' | 'execute' | 'transaction'
-    sql: string
-    startedAt: string
-  },
-  outcome:
-    | { status: 'Success'; rowCount?: number }
-    | { status: 'Fail'; err: unknown },
-): Promise<void> {
-  if (loggingScope.getStore()) return
-  const reqCtx = await getRequestCtx()
-  void insertLogQuery({
-    db: args.db,
-    provider: args.provider,
-    op: args.op,
-    sql: args.sql,
-    startedAt: args.startedAt,
-    endedAt: dayjs().utcOffset(9 * 60).format('YYYY-MM-DDTHH:mm:ss.SSSZ'),
-    rowCount: outcome.status === 'Success' ? outcome.rowCount : undefined,
-    errorDesc:
-      outcome.status === 'Fail'
-        // raw 에러 전체(메시지/스택/driver code/cause 체인) 를 한 줄 텍스트로 직렬화.
-        // String(err) → "Error: 메시지" 만, JSON.stringify(err) → 빈 객체 {} 라서 inspect 가 정답.
-        ? inspect(outcome.err, { depth: null, breakLength: Infinity, maxStringLength: Infinity })
-        : undefined,
-    ...reqCtx,
-  })
-}
 
 export function getDb(name: string = 'MAIN'): IDbClient {
   const cached = clientCache.get(name)
@@ -112,33 +75,41 @@ export function getDb(name: string = 'MAIN'): IDbClient {
 
   const client: IDbClient = {
     async query<T>(sql: string, binds: BindParams = {}) {
-      const logInfo = { db: name, provider: providerName, op: 'query' as const, sql, startedAt: dayjs().utcOffset(9 * 60).format('YYYY-MM-DDTHH:mm:ss.SSSZ') }
+      const startedAt = dayjs().utcOffset(9 * 60).format('YYYY-MM-DDTHH:mm:ss.SSSZ')
       try {
         const st = txStore.getStore()
         if (st && st.dbName !== name) {
           throw new Error(`tx(${st.dbName}) 스코프 안에서 다른 DB(${name}) 호출은 허용되지 않습니다.`)
         }
         const result = await provider.query<T>(name, dsn, pool, sql, binds, st ? { conn: st.conn } : {})
-        await logDb(logInfo, { status: 'Success', rowCount: result.rows.length })
+        if (!loggingScope.getStore()) {
+          void insertLogQuery({ db: name, provider: providerName, op: 'query', sql, startedAt, endedAt: dayjs().utcOffset(9 * 60).format('YYYY-MM-DDTHH:mm:ss.SSSZ'), rowCount: result.rows.length, })
+        }
         return result
       } catch (err) {
-        await logDb(logInfo, { status: 'Fail', err })
+        if (!loggingScope.getStore()) {
+          void insertLogQuery({ db: name, provider: providerName, op: 'query', sql, startedAt, endedAt: dayjs().utcOffset(9 * 60).format('YYYY-MM-DDTHH:mm:ss.SSSZ'), errorDesc: inspect(err, { depth: null, breakLength: Infinity, maxStringLength: Infinity }), })
+        }
         throw err
       }
     },
 
     async execute<T>(sql: string, binds: BindParams = {}) {
-      const logInfo = { db: name, provider: providerName, op: 'execute' as const, sql, startedAt: dayjs().utcOffset(9 * 60).format('YYYY-MM-DDTHH:mm:ss.SSSZ') }
+      const startedAt = dayjs().utcOffset(9 * 60).format('YYYY-MM-DDTHH:mm:ss.SSSZ')
       try {
         const st = txStore.getStore()
         if (st && st.dbName !== name) {
           throw new Error(`tx(${st.dbName}) 스코프 안에서 다른 DB(${name}) 호출은 허용되지 않습니다.`)
         }
         const result = await provider.execute<T>(name, dsn, pool, sql, binds, st ? { conn: st.conn } : {})
-        await logDb(logInfo, { status: 'Success', rowCount: result.rowsAffected })
+        if (!loggingScope.getStore()) {
+          void insertLogQuery({ db: name, provider: providerName, op: 'execute', sql, startedAt, endedAt: dayjs().utcOffset(9 * 60).format('YYYY-MM-DDTHH:mm:ss.SSSZ'), rowCount: result.rowsAffected, })
+        }
         return result
       } catch (err) {
-        await logDb(logInfo, { status: 'Fail', err })
+        if (!loggingScope.getStore()) {
+          void insertLogQuery({ db: name, provider: providerName, op: 'execute', sql, startedAt, endedAt: dayjs().utcOffset(9 * 60).format('YYYY-MM-DDTHH:mm:ss.SSSZ'), errorDesc: inspect(err, { depth: null, breakLength: Infinity, maxStringLength: Infinity }), })
+        }
         throw err
       }
     },

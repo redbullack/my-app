@@ -19,26 +19,23 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { getRequestCtx } from '@/lib/utils/server/requestContext'
 import { getDb } from './factory'
 
 /** factory 가 로깅 경로 진입 전에 확인하는 재귀 가드 플래그. */
 export const loggingScope = new AsyncLocalStorage<true>()
 
-export interface LogFields {
+/**
+ * factory 가 넘기는 쿼리 메타 (사용자 컨텍스트는 insertLogQuery 가 직접 조회).
+ */
+export interface LogInfo {
   db?: string
   provider?: string
-  // op?: 'query' | 'execute' | 'transaction'
   op?: string
   sql?: string
   startedAt?: string
   endedAt?: string
-  // durationMs?: number
   rowCount?: number
-  pagePath?: string
-  userId?: string
-  userName?: string
-  role?: string
-  empno?: number
   /** 있으면 STATUS='FAIL', 없으면 'OK'. `util.inspect(err, ...)` 결과 그대로. */
   errorDesc?: string
 }
@@ -54,8 +51,10 @@ export function sqlPreview(sql: string, max = 200): string {
  * 로그 INSERT 자체는 `loggingScope.run(true, ...)` 안에서 실행되어 factory 의
  * 재귀 로깅을 차단한다.
  */
-export async function insertLogQuery(fields: LogFields): Promise<void> {
+export async function insertLogQuery(fields: LogInfo): Promise<void> {
   try {
+    // 사용자 컨텍스트는 logger 가 직접 조회 — factory 는 쿼리 메타만 넘기면 된다.
+    const reqCtx = await getRequestCtx()
     await loggingScope.run(true, async () => {
       await getDb('MAIN').execute(
         `INSERT INTO SCOTT.NEXT_TEST_LOG_QUERY
@@ -64,7 +63,7 @@ export async function insertLogQuery(fields: LogFields): Promise<void> {
            PAGE_PATH, USER_ID, USER_NAME, ROLE, EMPNO,
            ERROR_DESC, CREATED_AT)
          VALUES
-          (:dbName, :provider, :op, :sqlPreview,
+          (:dbName, :provider, :op, :sql,
            :status, :startedAt, :endedAt, :rowCount,
            :pagePath, :userId, :userName, :role, :empno,
            :errorDesc, SYSDATE)`,
@@ -72,18 +71,17 @@ export async function insertLogQuery(fields: LogFields): Promise<void> {
           dbName:     fields.db         ?? null,
           provider:   fields.provider   ?? null,
           op:         fields.op         ?? null,
-          // sqlPreview: typeof fields.sql === 'string' ? sqlPreview(fields.sql) : null,
-          sqlPreview: typeof fields.sql === 'string' ? fields.sql : null,
+          // sqlPreview: typeof fields.sql === 'string' ? fields.sql : null,
+          sql: typeof fields.sql === 'string' ? fields.sql : null,
           status:     fields.errorDesc ? 'FAIL' : 'OK',
           startedAt:  fields.startedAt  ?? null,
           endedAt:    fields.endedAt    ?? null,
-          // durationMs: fields.durationMs ?? null,
           rowCount:   fields.rowCount   ?? null,
-          pagePath:   fields.pagePath   ?? null,
-          userId:     fields.userId     ?? null,
-          userName:   fields.userName   ?? null,
-          role:       fields.role       ?? null,
-          empno:      fields.empno      ?? null,
+          pagePath:   reqCtx.pagePath   ?? null,
+          userId:     reqCtx.userId     ?? null,
+          userName:   reqCtx.userName   ?? null,
+          role:       reqCtx.role       ?? null,
+          empno:      reqCtx.empno      ?? null,
           errorDesc:  fields.errorDesc  ?? null,
         },
       )
