@@ -24,19 +24,6 @@
  *     명시적으로 `BEGIN ... COMMIT/ROLLBACK` 을 발급해야 한다. `acquireTxConnection` 단계에서
  *     `BEGIN` 까지 발급하고, commit/rollback 도 SQL 발급으로 처리한다.
  *
- *  3) **per-query timeout**: pg 는 connection 단위 `statement_timeout` 으로만 통제 가능. 매
- *     쿼리마다 `SET LOCAL statement_timeout` (tx 안) 또는 `SET statement_timeout` →
- *     query → `RESET statement_timeout` (tx 밖) 패턴으로 적용. 풀에서 conn 을 빌릴 때마다
- *     상태가 초기화되도록 RESET 도 finally 단계에서 best-effort 로 수행한다.
- *
- *  4) **maxRows**: pg 의 표준 `query()` 는 maxRows 옵션이 없다. cursor/portal 로 partial fetch
- *     하지 않는 한 결과는 모두 클라이언트에 들어온다. 정직한 semantics 를 위해 결과 행을 JS
- *     사이드에서 slice 한다. 큰 결과를 LIMIT 없이 가져오는 코드를 막아주는 안전장치 정도의
- *     의미이며, 네트워크/메모리 비용 절감 효과는 LIMIT 만큼 크지 않다.
- *
- *  5) **destroy(drop)**: pg 는 `client.release(err)` 의 err 가 truthy 면 해당 connection 을 풀에서
- *     꺼내 destroy 한다 — oracledb 의 `close({drop:true})` 와 의미 동일. tx 안전망 발동 시 사용.
- *
  * 풀 캐시는 HMR/다중 import 환경에서의 누수 방지를 위해 globalThis 에 보관한다.
  */
 
@@ -47,12 +34,10 @@ import type {
   ExecuteResult,
   IDbProvider,
   PoolOptions,
-  InternalQueryOptions,
+  QueryOptions,
   QueryResult,
   ResolvedDsn,
 } from '../types'
-import { DbError, categorizePostgresError } from '../errors'
-import { getDbLogger } from '../logger'
 
 /* ─── 풀 캐시 ──────────────────────────────────────────────────────── */
 
@@ -78,18 +63,12 @@ function parsePostgresLocation(connectString: string): {
 } {
   const slash = connectString.lastIndexOf('/')
   if (slash < 0) {
-    throw new DbError({
-      category: 'config',
-      devMessage: `Postgres connectString 형식 오류 — '/database' 가 없습니다: ${connectString}`,
-    })
+    throw new Error(`Postgres connectString 형식 오류 — '/database' 가 없습니다: ${connectString}`)
   }
   const hostPort = connectString.slice(0, slash)
   const database = connectString.slice(slash + 1)
   if (!database) {
-    throw new DbError({
-      category: 'config',
-      devMessage: `Postgres connectString 의 database 가 비어있습니다: ${connectString}`,
-    })
+    throw new Error(`Postgres connectString 의 database 가 비어있습니다: ${connectString}`)
   }
 
   const colon = hostPort.lastIndexOf(':')
@@ -103,18 +82,12 @@ function parsePostgresLocation(connectString: string): {
     const portStr = hostPort.slice(colon + 1)
     const parsed = Number.parseInt(portStr, 10)
     if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 65535) {
-      throw new DbError({
-        category: 'config',
-        devMessage: `Postgres connectString 의 port 가 잘못되었습니다: ${portStr}`,
-      })
+      throw new Error(`Postgres connectString 의 port 가 잘못되었습니다: ${portStr}`)
     }
     port = parsed
   }
   if (!host) {
-    throw new DbError({
-      category: 'config',
-      devMessage: `Postgres connectString 의 host 가 비어있습니다: ${connectString}`,
-    })
+    throw new Error(`Postgres connectString 의 host 가 비어있습니다: ${connectString}`)
   }
   return { host, port, database }
 }
@@ -227,10 +200,9 @@ function bindNamedToPositional(
       if (idMatch) {
         const name = idMatch[0]
         if (!Object.prototype.hasOwnProperty.call(binds, name)) {
-          throw new DbError({
-            category: 'syntax',
-            devMessage: `Postgres bind 변환 실패 — SQL 의 ':${name}' 에 대응하는 binds 키가 없습니다.`,
-          })
+          throw new Error(
+            `Postgres bind 변환 실패 — SQL 의 ':${name}' 에 대응하는 binds 키가 없습니다.`,
+          )
         }
         values.push(binds[name])
         out.push(`$${values.length}`)
@@ -318,7 +290,7 @@ async function getPool(
   const existing = store.get(dbName)
   if (existing) return existing
 
-  const log = getDbLogger()
+  // const log = getDbLogger()
   const { host, port, database } = parsePostgresLocation(dsn.connectString)
 
   // pg.Pool 생성 자체는 동기지만, 실제 첫 connect 까지는 풀이 비어있다.
@@ -343,14 +315,14 @@ async function getPool(
       // 풀 단위 'error' 이벤트 — idle conn 이 서버 측 종료/네트워크 절단으로 죽을 때 발생.
       // 처리하지 않으면 Node 가 프로세스를 종료시키므로 반드시 listener 부착.
       p.on('error', (err) => {
-        log.error('pool.idle_error', {
+        console.error('pool.idle_error', {
           db: dbName,
           provider: 'postgres',
           cause: err instanceof Error ? err.message : String(err),
         })
       })
 
-      log.info('pool.created', {
+      console.info('pool.created', {
         db: dbName,
         provider: 'postgres',
         min: pool?.min ?? 1,
@@ -360,15 +332,7 @@ async function getPool(
     } catch (err) {
       // 동기 생성 실패 시 캐시에서 제거.
       store.delete(dbName)
-      const { category, code } = categorizePostgresError(err)
-      reject(
-        new DbError({
-          category: category === 'unknown' ? 'connection' : category,
-          code,
-          cause: err,
-          devMessage: `Postgres 풀 생성 실패 (db=${dbName})`,
-        }),
-      )
+      reject(err)
     }
   })
 
@@ -378,57 +342,19 @@ async function getPool(
 
 /* ─── 공통 실행 헬퍼 ─────────────────────────────────────────────── */
 
-function toDbError(err: unknown, dbName: string, traceId: string | undefined): DbError {
-  const { category, code } = categorizePostgresError(err)
-  return new DbError({
-    category,
-    code,
-    traceId,
-    cause: err,
-    devMessage: `Postgres 쿼리 실패 (db=${dbName})`,
-  })
-}
-
-/**
- * 단일 client 위에서 (필요 시 timeout 을 적용하여) 쿼리 1건을 실행한다.
- * - `inTx` = true 면 `SET LOCAL statement_timeout` 으로 트랜잭션 종료 시 자동 복귀.
- * - `inTx` = false 면 SET → 실행 → RESET 패턴으로 conn 의 다음 사용자에 영향 없게 함.
- */
+/** 단일 client 위에서 쿼리 1건을 실행한다. */
 async function runOnClient<T extends QueryResultRow>(
   client: PoolClient,
   sql: string,
   binds: BindParams,
-  opts: InternalQueryOptions,
-  inTx: boolean,
 ): Promise<{ rows: T[]; rowsAffected: number; fields: FieldDef[] | undefined }> {
   const { text, values } = toValues(binds, sql)
-
-  if (typeof opts.timeoutMs === 'number' && opts.timeoutMs > 0) {
-    const setStmt = inTx ? 'SET LOCAL statement_timeout = $1' : 'SET statement_timeout = $1'
-    await client.query(setStmt, [opts.timeoutMs])
-  }
-
-  try {
-    const result = await client.query<T>({ text, values })
-    let rows = result.rows
-    if (typeof opts.maxRows === 'number' && opts.maxRows >= 0 && rows.length > opts.maxRows) {
-      rows = rows.slice(0, opts.maxRows)
-    }
-    return {
-      rows,
-      // pg 는 SELECT 의 rowCount 도 채워주므로 그대로 노출. null 인 경우 0.
-      rowsAffected: result.rowCount ?? 0,
-      fields: result.fields,
-    }
-  } finally {
-    // tx 밖에서만 RESET — tx 안의 SET LOCAL 은 트랜잭션 종료 시 자동 복귀하므로 불필요.
-    if (!inTx && typeof opts.timeoutMs === 'number' && opts.timeoutMs > 0) {
-      try {
-        await client.query('RESET statement_timeout')
-      } catch {
-        /* RESET 실패는 무시 — 풀 반납 단계에서 conn 이 폐기되거나 다음 SET 으로 덮어쓸 수 있다. */
-      }
-    }
+  const result = await client.query<T>({ text, values })
+  return {
+    rows: result.rows,
+    // pg 는 SELECT 의 rowCount 도 채워주므로 그대로 노출. null 인 경우 0.
+    rowsAffected: result.rowCount ?? 0,
+    fields: result.fields,
   }
 }
 
@@ -440,26 +366,20 @@ async function postgresQuery<T>(
   pool: PoolOptions | undefined,
   sql: string,
   binds: BindParams,
-  opts: InternalQueryOptions,
+  opts: QueryOptions,
 ): Promise<QueryResult<T>> {
   // 트랜잭션 컨텍스트에서 전달된 raw client 가 있으면 풀에서 빌리지 않고 그 위에서 실행.
   if (opts.conn) {
     const client = opts.conn as PoolClient
-    try {
-      const r = await runOnClient<QueryResultRow>(client, sql, binds, opts, true)
-      return { columns: toColumns(r.fields), rows: r.rows as unknown as T[] }
-    } catch (err) {
-      throw toDbError(err, dbName, opts.traceId)
-    }
+    const r = await runOnClient<QueryResultRow>(client, sql, binds)
+    return { columns: toColumns(r.fields), rows: r.rows as unknown as T[] }
   }
 
   const p = await getPool(dbName, dsn, pool)
   const client = await p.connect()
   try {
-    const r = await runOnClient<QueryResultRow>(client, sql, binds, opts, false)
+    const r = await runOnClient<QueryResultRow>(client, sql, binds)
     return { columns: toColumns(r.fields), rows: r.rows as unknown as T[] }
-  } catch (err) {
-    throw toDbError(err, dbName, opts.traceId)
   } finally {
     try {
       client.release()
@@ -475,25 +395,19 @@ async function postgresExecute<T>(
   pool: PoolOptions | undefined,
   sql: string,
   binds: BindParams,
-  opts: InternalQueryOptions,
+  opts: QueryOptions,
 ): Promise<ExecuteResult<T>> {
   if (opts.conn) {
     const client = opts.conn as PoolClient
-    try {
-      const r = await runOnClient<QueryResultRow>(client, sql, binds, opts, true)
-      return { rows: r.rows as unknown as T[], rowsAffected: r.rowsAffected }
-    } catch (err) {
-      throw toDbError(err, dbName, opts.traceId)
-    }
+    const r = await runOnClient<QueryResultRow>(client, sql, binds)
+    return { rows: r.rows as unknown as T[], rowsAffected: r.rowsAffected }
   }
 
   const p = await getPool(dbName, dsn, pool)
   const client = await p.connect()
   try {
-    const r = await runOnClient<QueryResultRow>(client, sql, binds, opts, false)
+    const r = await runOnClient<QueryResultRow>(client, sql, binds)
     return { rows: r.rows as unknown as T[], rowsAffected: r.rowsAffected }
-  } catch (err) {
-    throw toDbError(err, dbName, opts.traceId)
   } finally {
     try {
       client.release()
@@ -527,7 +441,7 @@ async function postgresAcquireTxConnection(
     } catch {
       /* noop */
     }
-    throw toDbError(err, dbName, undefined)
+    throw err
   }
 }
 
@@ -544,19 +458,6 @@ async function postgresRollback(conn: unknown): Promise<void> {
 async function postgresRelease(conn: unknown): Promise<void> {
   try {
     ;(conn as PoolClient).release()
-  } catch {
-    /* noop */
-  }
-}
-
-/**
- * 풀로 반납하지 않고 client 를 폐기한다.
- * pg 는 `release(err)` 에 truthy err 를 넘기면 해당 client 를 풀에서 빼낸 뒤 destroy 한다.
- * tx 안전망(await 누락 / aborted)이 발동된 경우만 호출된다.
- */
-async function postgresDestroy(conn: unknown): Promise<void> {
-  try {
-    ;(conn as PoolClient).release(new Error('myapp:tx-destroyed'))
   } catch {
     /* noop */
   }
@@ -619,7 +520,6 @@ export const postgresProvider: IDbProvider = {
   commit: postgresCommit,
   rollback: postgresRollback,
   release: postgresRelease,
-  destroy: postgresDestroy,
   warmup: postgresWarmup,
   closePool: postgresClosePool,
   closeAll: postgresCloseAll,

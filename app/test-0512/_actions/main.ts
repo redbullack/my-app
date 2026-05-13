@@ -30,8 +30,8 @@ function buildInClause(
   return `${column} IN (${keys.join(', ')})`
 }
 
-export const fetchJobOptions = async () =>
-  actionAgent('fetchJobOptions', async (): Promise<string[]> => {
+export const fetchJobOptions = async () => {
+  // actionAgent('fetchJobOptions', async (): Promise<string[]> => {
     const result = await db.query<{ VALUE: string }>(
       `SELECT DISTINCT JOB AS "VALUE"
          FROM SCOTT.EMP
@@ -39,10 +39,10 @@ export const fetchJobOptions = async () =>
         ORDER BY 1`,
     )
     return result.rows.map(r => r.VALUE)
-  })
+}
 
-export const fetchEmpnoOptions = async (selectedJob: string[]) =>
-  actionAgent('fetchEmpnoOptions', async (): Promise<string[]> => {
+export const fetchEmpnoOptions = async (selectedJob: string[]) => {
+  // actionAgent('fetchEmpnoOptions', async (): Promise<string[]> => {
     const binds: Record<string, unknown> = {}
     const where = buildInClause('JOB', selectedJob, 'job', binds)
     const result = await db.query<{ VALUE: string }>(
@@ -53,10 +53,10 @@ export const fetchEmpnoOptions = async (selectedJob: string[]) =>
       binds,
     )
     return result.rows.map(r => r.VALUE)
-  })
+}
 
-export const fetchEnameOptions = async (selectedJob: string[]) =>
-  actionAgent('fetchEnameOptions', async (): Promise<string[]> => {
+export const fetchEnameOptions = async (selectedJob: string[]) => {
+  // actionAgent('fetchEnameOptions', async (): Promise<string[]> => {
     const binds: Record<string, unknown> = {}
     const where = buildInClause('JOB', selectedJob, 'job', binds)
     const result = await db.query<{ VALUE: string }>(
@@ -68,7 +68,7 @@ export const fetchEnameOptions = async (selectedJob: string[]) =>
       binds,
     )
     return result.rows.map(r => r.VALUE)
-  })
+}
 
 export interface EmpSearchCond {
   job: string[]
@@ -87,8 +87,8 @@ export interface EmpRow {
   DEPTNO: string | null
 }
 
-export const fetchEmpList = async (cond: EmpSearchCond) =>
-  actionAgent('fetchEmpList', async () => {
+export const fetchEmpList = async (cond: EmpSearchCond) => {
+  // actionAgent('fetchEmpList', async () => {
     const binds: Record<string, unknown> = {}
     const where = [
       buildInClause('JOB', cond.job, 'job', binds),
@@ -110,4 +110,4 @@ export const fetchEmpList = async (cond: EmpSearchCond) =>
         ORDER BY EMPNO`,
       binds,
     )
-  })
+}

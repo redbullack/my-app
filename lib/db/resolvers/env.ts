@@ -12,7 +12,6 @@
  * ```
  */
 
-import { DbError } from '../errors'
 import type { PoolOptions, ProviderName, ResolvedDsn } from '../types'
 
 export interface EnvResolveResult {
@@ -33,29 +32,20 @@ export function resolveFromEnv(name: string): EnvResolveResult | null {
   try {
     dbConfig = JSON.parse(raw)
   } catch {
-    throw new DbError({
-      category: 'config',
-      devMessage: `DB_CONNECTION__${name} 환경변수의 JSON 파싱 실패`,
-    })
+    throw new Error(`DB_CONNECTION__${name} 환경변수의 JSON 파싱 실패`)
   }
 
   const providerName: ProviderName = (dbConfig.providerName as ProviderName) ?? 'oracle'
 
   if (!dbConfig.connectionString) {
-    throw new DbError({
-      category: 'config',
-      devMessage: `DB_CONNECTION__${name} 에 connectionString 이 없습니다`,
-    })
+    throw new Error(`DB_CONNECTION__${name} 에 connectionString 이 없습니다`)
   }
 
   if (providerName === 'oracle' || dbConfig.connectionString) {
     return parseAdoConnectionString(name, providerName, dbConfig.connectionString)
   }
 
-  throw new DbError({
-    category: 'config',
-    devMessage: `DB_CONNECTION__${name}: 지원되지 않는 providerName "${providerName}"`,
-  })
+  throw new Error(`DB_CONNECTION__${name}: 지원되지 않는 providerName "${providerName}"`)
 }
 
 /**
@@ -102,10 +92,9 @@ function parseAdoConnectionString(
   }
 
   if (!user || !password || !connectString) {
-    throw new DbError({
-      category: 'config',
-      devMessage: `DB_CONNECTION__${name}: connectionString 에서 User ID, Password, Data Source 가 모두 필요합니다`,
-    })
+    throw new Error(
+      `DB_CONNECTION__${name}: connectionString 에서 User ID, Password, Data Source 가 모두 필요합니다`,
+    )
   }
 
   return {

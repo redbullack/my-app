@@ -11,7 +11,7 @@
 import NextAuth from 'next-auth'
 import Credentials from 'next-auth/providers/credentials'
 import type { Emp } from '@/types/emp'
-import { getSysDb } from '../db/factory'
+import { getDb } from '../db/factory'
 
 /**
  * ──────────────────────────────────────────────────────────────
@@ -98,7 +98,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         // Oracle EMP 테이블에서 ENAME 조회
         const username = (credentials.username as string).toUpperCase()
-        const db = getSysDb('MAIN')
+        const db = getDb('MAIN')
         const result = await db.query<Emp>(
           'SELECT EMPNO, ENAME, JOB FROM EMP WHERE ENAME = :username',
           [username],

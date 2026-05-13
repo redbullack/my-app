@@ -13,12 +13,10 @@ import type {
   ExecuteResult,
   IDbProvider,
   PoolOptions,
-  InternalQueryOptions,
+  QueryOptions,
   QueryResult,
   ResolvedDsn,
 } from '../types'
-import { DbError, categorizeOracleError } from '../errors'
-import { getDbLogger } from '../logger'
 import path from 'node:path'
 
 /* Thick 모드 초기화 */
@@ -31,16 +29,15 @@ function ensureThickMode(): void {
   try {
     oracledb.initOracleClient({ libDir })
     g[THICK_INIT_KEY] = true
-    getDbLogger().info('oracle.thick.initialized', {
+    console.log('oracle.thick.initialized', {
       libDir,
       clientVersion: oracledb.oracleClientVersionString,
     })
   } catch (err) {
-    throw new DbError({
-      category: 'config',
-      cause: err,
-      devMessage: `Oracle Thick 모드 초기화 실패 — libDir=${libDir}. Instant Client 설치 또는 ORACLE_CLIENT_LIB_DIR 를 확인하세요.`,
-    })
+    throw new Error(
+      `Oracle Thick 모드 초기화 실패 — libDir=${libDir}. Instant Client 설치 또는 ORACLE_CLIENT_LIB_DIR 를 확인하세요.`,
+      { cause: err },
+    )
   }
 }
 
@@ -60,19 +57,13 @@ function getPoolStore(): PoolStore {
 export function parseOracleDsn(plain: string): ResolvedDsn {
   const at = plain.indexOf('@')
   if (at < 0) {
-    throw new DbError({
-      category: 'config',
-      devMessage: `Oracle connectString 형식 오류 — '@' 구분자가 없습니다: ${plain}`,
-    })
+    throw new Error(`Oracle connectString 형식 오류 — '@' 구분자가 없습니다: ${plain}`)
   }
   const cred = plain.slice(0, at)
   const host = plain.slice(at + 1)
   const slash = cred.indexOf('/')
   if (slash < 0) {
-    throw new DbError({
-      category: 'config',
-      devMessage: `Oracle connectString 형식 오류 — 'user/password' 구분자가 없습니다.`,
-    })
+    throw new Error(`Oracle connectString 형식 오류 — 'user/password' 구분자가 없습니다.`)
   }
   return {
     user: cred.slice(0, slash),
@@ -108,7 +99,6 @@ async function getPool(
 
   ensureThickMode()
 
-  const log = getDbLogger()
   p = oracledb
     .createPool({
       user: dsn.user,
@@ -121,7 +111,7 @@ async function getPool(
       poolTimeout: pool?.timeoutSec ?? 60,
     })
     .then((created) => {
-      log.info('pool.created', {
+      console.log('pool.created', {
         db: dbName,
         provider: 'oracle',
         min: pool?.min ?? 1,
@@ -132,51 +122,27 @@ async function getPool(
     .catch((err: unknown) => {
       // 실패 시 캐시에서 제거 → 다음 호출에 재시도 가능
       store.delete(dbName)
-      const { category, code } = categorizeOracleError(err)
-      throw new DbError({
-        category: category === 'unknown' ? 'connection' : category,
-        code,
-        cause: err,
-        devMessage: `Oracle 풀 생성 실패 (db=${dbName})`,
-      })
+      throw err
     })
 
   store.set(dbName, p)
   return p
 }
 
-function toExecuteOptions(opts: InternalQueryOptions, autoCommit: boolean): oracledb.ExecuteOptions {
-  const out: oracledb.ExecuteOptions = {
+function toExecuteOptions(autoCommit: boolean): oracledb.ExecuteOptions {
+  return {
     outFormat: oracledb.OUT_FORMAT_OBJECT,
     autoCommit,
   }
-  if (opts.maxRows !== undefined) out.maxRows = opts.maxRows
-  return out
-}
-
-function toDbError(err: unknown, dbName: string, traceId: string | undefined): DbError {
-  const { category, code } = categorizeOracleError(err)
-  return new DbError({
-    category,
-    code,
-    traceId,
-    cause: err,
-    devMessage: `Oracle 쿼리 실패 (db=${dbName})`,
-  })
 }
 
 async function runOnConnection<T>(
   conn: oracledb.Connection,
   sql: string,
   binds: BindParams,
-  opts: InternalQueryOptions,
   autoCommit: boolean,
 ): Promise<oracledb.Result<T>> {
-  // oracledb 의 timeout 은 connection.callTimeout (ms)
-  if (opts.timeoutMs !== undefined) {
-    ; (conn as oracledb.Connection & { callTimeout?: number }).callTimeout = opts.timeoutMs
-  }
-  return conn.execute<T>(sql, binds as oracledb.BindParameters, toExecuteOptions(opts, autoCommit))
+  return conn.execute<T>(sql, binds as oracledb.BindParameters, toExecuteOptions(autoCommit))
 }
 
 async function oracleQuery<T>(
@@ -185,32 +151,26 @@ async function oracleQuery<T>(
   pool: PoolOptions | undefined,
   sql: string,
   binds: BindParams,
-  opts: InternalQueryOptions,
+  opts: QueryOptions,
 ): Promise<QueryResult<T>> {
   // 트랜잭션 컨텍스트(factory ALS) 에서 전달된 raw 커넥션이 있으면 풀에서 빌리지 않고 그 위에서 실행한다.
   if (opts.conn) {
     const conn = opts.conn as oracledb.Connection
-    try {
-      const result = await runOnConnection<T>(conn, sql, binds, opts, false)
-      return {
-        columns: toColumns(result.metaData),
-        rows: (result.rows ?? []) as T[],
-      }
-    } catch (err) {
-      throw toDbError(err, dbName, opts.traceId)
+    const result = await runOnConnection<T>(conn, sql, binds, false)
+    return {
+      columns: toColumns(result.metaData),
+      rows: (result.rows ?? []) as T[],
     }
   }
 
   const p = await getPool(dbName, dsn, pool)
   const conn = await p.getConnection()
   try {
-    const result = await runOnConnection<T>(conn, sql, binds, opts, true)
+    const result = await runOnConnection<T>(conn, sql, binds, true)
     return {
       columns: toColumns(result.metaData),
       rows: (result.rows ?? []) as T[],
     }
-  } catch (err) {
-    throw toDbError(err, dbName, opts.traceId)
   } finally {
     try {
       await conn.close()
@@ -226,31 +186,25 @@ async function oracleExecute<T>(
   pool: PoolOptions | undefined,
   sql: string,
   binds: BindParams,
-  opts: InternalQueryOptions,
+  opts: QueryOptions,
 ): Promise<ExecuteResult<T>> {
   if (opts.conn) {
     const conn = opts.conn as oracledb.Connection
-    try {
-      const result = await runOnConnection<T>(conn, sql, binds, opts, false)
-      return {
-        rows: (result.rows ?? []) as T[],
-        rowsAffected: result.rowsAffected ?? 0,
-      }
-    } catch (err) {
-      throw toDbError(err, dbName, opts.traceId)
+    const result = await runOnConnection<T>(conn, sql, binds, false)
+    return {
+      rows: (result.rows ?? []) as T[],
+      rowsAffected: result.rowsAffected ?? 0,
     }
   }
 
   const p = await getPool(dbName, dsn, pool)
   const conn = await p.getConnection()
   try {
-    const result = await runOnConnection<T>(conn, sql, binds, opts, true)
+    const result = await runOnConnection<T>(conn, sql, binds, true)
     return {
       rows: (result.rows ?? []) as T[],
       rowsAffected: result.rowsAffected ?? 0,
     }
-  } catch (err) {
-    throw toDbError(err, dbName, opts.traceId)
   } finally {
     try {
       await conn.close()
@@ -280,19 +234,6 @@ async function oracleRollback(conn: unknown): Promise<void> {
 async function oracleRelease(conn: unknown): Promise<void> {
   try {
     await (conn as oracledb.Connection).close()
-  } catch {
-    /* noop */
-  }
-}
-
-/**
- * 풀로 반납하지 않고 conn 을 영구 폐기한다.
- * oracledb 는 close 옵션의 `drop: true` 로 풀에서 빼낸 뒤 닫는다.
- * tx 안전망(await 누락/aborted)이 발동된 경우만 호출된다.
- */
-async function oracleDestroy(conn: unknown): Promise<void> {
-  try {
-    await (conn as oracledb.Connection).close({ drop: true })
   } catch {
     /* noop */
   }
@@ -342,7 +283,6 @@ export const oracleProvider: IDbProvider = {
   commit: oracleCommit,
   rollback: oracleRollback,
   release: oracleRelease,
-  destroy: oracleDestroy,
   warmup: oracleWarmup,
   closePool: oracleClosePool,
   closeAll: oracleCloseAll,
