@@ -38,7 +38,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { inspect } from 'node:util'
 import dayjs from 'dayjs'
 import utc from 'dayjs/plugin/utc'
-import { insertLogQuery, loggingScope } from './logger'
+import { insertLogQuery } from './logger'
 import { closeAllProviders, getProvider } from './providers'
 import { resolveFromEnv } from './resolvers/env'
 import type {
@@ -82,14 +82,10 @@ export function getDb(name: string = 'MAIN'): IDbClient {
           throw new Error(`tx(${st.dbName}) 스코프 안에서 다른 DB(${name}) 호출은 허용되지 않습니다.`)
         }
         const result = await provider.query<T>(name, dsn, pool, sql, binds, st ? { conn: st.conn } : {})
-        if (!loggingScope.getStore()) {
-          void insertLogQuery({ db: name, provider: providerName, op: 'query', sql, startedAt, endedAt: dayjs().utcOffset(9 * 60).format('YYYY-MM-DDTHH:mm:ss.SSSZ'), rowCount: result.rows.length, })
-        }
+        void insertLogQuery({ db: name, provider: providerName, op: 'query', sql, startedAt, endedAt: dayjs().utcOffset(9 * 60).format('YYYY-MM-DDTHH:mm:ss.SSSZ'), rowCount: result.rows.length, })
         return result
       } catch (err) {
-        if (!loggingScope.getStore()) {
-          void insertLogQuery({ db: name, provider: providerName, op: 'query', sql, startedAt, endedAt: dayjs().utcOffset(9 * 60).format('YYYY-MM-DDTHH:mm:ss.SSSZ'), errorDesc: inspect(err, { depth: null, breakLength: Infinity, maxStringLength: Infinity }), })
-        }
+        void insertLogQuery({ db: name, provider: providerName, op: 'query', sql, startedAt, endedAt: dayjs().utcOffset(9 * 60).format('YYYY-MM-DDTHH:mm:ss.SSSZ'), errorDesc: inspect(err, { depth: null, breakLength: Infinity, maxStringLength: Infinity }), })
         throw err
       }
     },
@@ -102,14 +98,10 @@ export function getDb(name: string = 'MAIN'): IDbClient {
           throw new Error(`tx(${st.dbName}) 스코프 안에서 다른 DB(${name}) 호출은 허용되지 않습니다.`)
         }
         const result = await provider.execute<T>(name, dsn, pool, sql, binds, st ? { conn: st.conn } : {})
-        if (!loggingScope.getStore()) {
-          void insertLogQuery({ db: name, provider: providerName, op: 'execute', sql, startedAt, endedAt: dayjs().utcOffset(9 * 60).format('YYYY-MM-DDTHH:mm:ss.SSSZ'), rowCount: result.rowsAffected, })
-        }
+        void insertLogQuery({ db: name, provider: providerName, op: 'execute', sql, startedAt, endedAt: dayjs().utcOffset(9 * 60).format('YYYY-MM-DDTHH:mm:ss.SSSZ'), rowCount: result.rowsAffected, })
         return result
       } catch (err) {
-        if (!loggingScope.getStore()) {
-          void insertLogQuery({ db: name, provider: providerName, op: 'execute', sql, startedAt, endedAt: dayjs().utcOffset(9 * 60).format('YYYY-MM-DDTHH:mm:ss.SSSZ'), errorDesc: inspect(err, { depth: null, breakLength: Infinity, maxStringLength: Infinity }), })
-        }
+        void insertLogQuery({ db: name, provider: providerName, op: 'execute', sql, startedAt, endedAt: dayjs().utcOffset(9 * 60).format('YYYY-MM-DDTHH:mm:ss.SSSZ'), errorDesc: inspect(err, { depth: null, breakLength: Infinity, maxStringLength: Infinity }), })
         throw err
       }
     },
