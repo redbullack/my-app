@@ -3,93 +3,122 @@
  * @description
  * 이벤트 핸들러용 Server Action 실행 훅.
  *
- * 팀원 규칙:
- *  - try/catch 금지. execute() 내부에서 envelope 자동 언래핑 + 실패 시 전역 핸들러 호출.
- *  - onSuccess 로 정상 경로만 기술.
- *  - onError 에서 'handled' 반환 시 전역 토스트 스킵 (자체 처리).
+ * 흐름 전제:
+ *  - DB(lib/db/factory) 에서 발생한 에러는 가공 없이 throw 되어 ServerAction → Client 로 올라온다.
+ *  - 프로덕션에서는 ServerAction throw 의 메시지가 마스킹되고 digest 만 남는다는 것을 기본 전제로 한다.
+ *  - 이 훅은 마지막 그물 역할: redirect/notFound 는 Next 런타임에 위임, 그 외는 분류 후 alert.
  *
- * @example
- * const { execute, isLoading } = useAction()
- * const onClick = () =>
- *   execute(() => updateEmp(rows), {
- *     onSuccess: ({ updated }) => toast(`${updated}건 수정 완료`, { variant: 'success' }),
- *   })
+ * 사용 패턴:
+ *   const { executeAction, isLoading, isError, error } = useAction<Emp[]>()
+ *
+ *   const onClick = async () => {
+ *     const rows = await executeAction(() => fetchEmps())
+ *     if (!rows) return                  // 실패 시 null — 훅이 alert 처리 완료
+ *     setRows(rows)
+ *   }
+ *
+ * TODO: PM 이 Toast 공용 컨트롤을 도입한 뒤 alert 호출 부분을 toast 로 교체.
  */
+'use client'
+
 import { useCallback, useState } from 'react'
-import { AppError, type ActionResponse } from '../type'
-import { handleGlobalError } from './globalErrorHandler'
 
-/**
- * Next.js 의 redirect() 가 던지는 NEXT_REDIRECT 에러인지 판별.
- *
- * Server Action 안에서 redirect() 가 호출되면 message="NEXT_REDIRECT" + digest=`NEXT_REDIRECT;...`
- * 형태의 에러가 클라이언트로 reject 된다. 이 케이스는 "에러" 가 아니라 정상적인 네비게이션이므로
- * 토스트/전역 에러 핸들러로 빠지면 안 된다 (Next 런타임이 별도로 페이지 이동을 처리한다).
- *
- * digest 우선 체크 — message 만 체크하면 사용자가 우연히 같은 문자열을 던지는 경우와 충돌.
- */
-function isNextRedirectError(err: unknown): boolean {
-    if (err == null || typeof err !== 'object') return false
-    const digest = (err as { digest?: unknown }).digest
-    if (typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT')) return true
-    const message = (err as { message?: unknown }).message
-    return message === 'NEXT_REDIRECT'
+export type ErrorKind = 'network' | 'aborted' | 'server' | 'unknown'
+
+// ─── 에러 식별 헬퍼 ─────────────────────────────────────────────────
+// next/dist 내부 경로의 isRedirectError/isNotFoundError 는 비공식 API 라
+// Next 버전 업 시 깨지기 쉽다. digest 문자열 직접 검사로 안전성 확보.
+
+function getDigest(err: unknown): string | undefined {
+  if (err == null || typeof err !== 'object') return undefined
+  const d = (err as { digest?: unknown }).digest
+  return typeof d === 'string' ? d : undefined
 }
 
-interface ExecuteOptions<T> {
-    onSuccess?: (data: T) => void
-    /** 반환값이 'handled' 면 전역 에러 핸들러 호출을 스킵한다. */
-    onError?: (error: AppError) => 'handled' | void
-    /** true 면 실패 시 전역 토스트를 띄우지 않는다. */
-    silent?: boolean
-    /** true 면 실패 시 가장 가까운 error.tsx(Error Boundary)로 throw 한다. */
-    throwToBoundary?: boolean
+function isNextRedirect(err: unknown): boolean {
+  return getDigest(err)?.startsWith('NEXT_REDIRECT') ?? false
 }
 
-export function useAction() {
-    const [isLoading, setIsLoading] = useState(false)
-    const [, setBoundaryError] = useState<unknown>(null)
+function isNextNotFound(err: unknown): boolean {
+  return getDigest(err)?.startsWith('NEXT_NOT_FOUND') ?? false
+}
 
-    const execute = useCallback(
-        <T>(
-            factory: () => Promise<ActionResponse<T>>,
-            opts: ExecuteOptions<T> = {},
-        ): void => {
-            ;(async () => {
-                setIsLoading(true)
-                try {
-                    const result = await factory()
-                    if (result.isSuccess) {
-                        opts.onSuccess?.(result.data)
-                        return
-                    }
-                    const appError = new AppError(result.error)
-                    const handled = opts.onError?.(appError)
-                    if (handled === 'handled' || opts.silent) return
-                    if (opts.throwToBoundary) {
-                        setBoundaryError(() => { throw appError })
-                        return
-                    }
-                    handleGlobalError(appError)
-                } catch (err: unknown) {
-                    // redirect() 는 에러가 아니라 정상 네비게이션 — Next 런타임이 처리하도록
-                    // rethrow 하고 토스트/onError 로 빠지지 않게 한다.
-                    if (isNextRedirectError(err)) throw err
-                    if (opts.silent) return
-                    if (opts.throwToBoundary) {
-                        setBoundaryError(() => { throw err })
-                        return
-                    }
-                    handleGlobalError(
-                        err instanceof Error ? err : new Error('알 수 없는 오류'),
-                    )
-                } finally {
-                    setIsLoading(false)
-                }
-            })()
-        },
-        [],
-    )
+function classifyError(err: unknown): { kind: ErrorKind; message: string } {
+  // 사용자가 페이지를 떠나거나 AbortController 가 발동된 경우 — 조용히 무시
+  if (err instanceof DOMException && err.name === 'AbortError') {
+    return { kind: 'aborted', message: '' }
+  }
+  // 네트워크 단절/서버 다운/CORS 등. 메시지 문구는 브라우저별로 미세하게 달라 느슨하게 매칭.
+  if (err instanceof TypeError && /fetch|network/i.test(err.message)) {
+    return {
+      kind: 'network',
+      message: '서버와 통신할 수 없습니다. 네트워크 상태를 확인해주세요.',
+    }
+  }
+  // digest 가 붙은 에러는 ServerAction 측에서 throw 된 것 (prod 에서 메시지 마스킹됨).
+  // DB throw 포함한 거의 모든 서버 측 에러가 여기로 떨어진다.
+  if (getDigest(err)) {
+    return {
+      kind: 'server',
+      message: '서버 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.',
+    }
+  }
+  return { kind: 'unknown', message: '처리 중 오류가 발생했습니다.' }
+}
 
-    return { execute, isLoading }
+interface ExecuteOptions {
+  /** true 면 실패 시 alert 를 띄우지 않는다. 상태(isError/error) 는 그대로 채워진다. */
+  silent?: boolean
+}
+
+export function useAction<T = unknown>() {
+  const [isLoading, setIsLoading] = useState(false)
+  const [isError, setIsError] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [errorKind, setErrorKind] = useState<ErrorKind | null>(null)
+  const [data, setData] = useState<T | null>(null)
+
+  const reset = useCallback(() => {
+    setIsError(false)
+    setError(null)
+    setErrorKind(null)
+  }, [])
+
+  const executeAction = useCallback(
+    async <R = T>(
+      factory: () => Promise<R>,
+      opts: ExecuteOptions = {},
+    ): Promise<R | null> => {
+      setIsLoading(true)
+      setIsError(false)
+      setError(null)
+      setErrorKind(null)
+
+      try {
+        const result = await factory()
+        setData(result as unknown as T)
+        return result
+      } catch (err: unknown) {
+        // redirect/notFound 는 에러가 아니라 정상 네비게이션 — Next 런타임으로 rethrow.
+        if (isNextRedirect(err) || isNextNotFound(err)) throw err
+
+        const { kind, message } = classifyError(err)
+        console.error('[useAction]', { kind, digest: getDigest(err), err })
+
+        setIsError(true)
+        setErrorKind(kind)
+        setError(message)
+
+        if (!opts.silent && kind !== 'aborted') {
+          alert(message)
+        }
+        return null
+      } finally {
+        setIsLoading(false)
+      }
+    },
+    [],
+  )
+
+  return { executeAction, isLoading, isError, error, errorKind, data, reset }
 }

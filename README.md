@@ -784,6 +784,31 @@ pnpm type-check
 - `useRef` 캐시 값을 `Promise<Row[]>` 로 통일 → `use()` 분기 코드 제거로 가독성 개선.
 - 동작은 동일하지만, 다른 공용 컨트롤(InputSelect, Chart 등) 도 동일한 1-stop API 를 재사용할 수 있는 기반을 마련.
 
+### DB 로거 factory 우회 & `useAction` 훅 전면 재설계
+
+**DB 로거 (`lib/db/logger.ts`, `lib/db/factory.ts`)**
+- `insertLogQuery()` 가 더 이상 `getDb('MAIN').execute(...)` 를 거치지 않고 **provider 를 직접 호출**한다.
+  - 기존 방식은 `loggingScope` ALS 플래그로 factory ↔ logger 재귀를 1단계에서 차단하는 우회였으나, 사용자 트랜잭션이 활성화된 컨텍스트에서 로그 INSERT 가 사용자 커넥션에 enlist 되어 **rollback 시 로그가 함께 유실**되고 트랜잭션 수명에 종속되는 문제가 있었다.
+  - 또한 사용자가 `MAIN` 이 아닌 다른 DB 트랜잭션 중일 때 factory 의 교차-DB 차단 가드(`tx(...) 스코프 안에서 다른 DB 호출 불허`) 에 걸려 매 쿼리마다 throw 가 발생했다.
+- logger 가 `resolveFromEnv('MAIN')` + `getProvider(...)` 로 직접 INSERT 하므로 `txStore` 영향권 밖에서 별도 커넥션이 사용되고, factory ↔ logger 재귀도 원천적으로 발생하지 않는다.
+- 이에 따라 `loggingScope` AsyncLocalStorage 가드를 logger / factory 양쪽에서 제거하고, factory 의 query/execute 성공·실패 양 경로에서 `insertLogQuery` 호출을 무조건 실행하도록 단순화했다.
+
+**클라이언트 액션 훅 (`lib/utils/client/useAction.ts`)**
+- 기존 envelope(`ActionResponse<T>`) 언래핑 + `AppError` + `handleGlobalError` 기반 설계를 폐기하고, **DB 에서 throw 된 raw 에러가 ServerAction 경계를 그대로 통과**하는 흐름을 전제로 재설계.
+- 새 API: `executeAction<R>(factory, opts?)` — 성공 시 결과값을, 실패 시 `null` 을 반환하며 훅이 내부적으로 alert 처리한다.
+- 에러 분류기 `classifyError()` 추가:
+  - `AbortError` → 조용히 무시 (`aborted`)
+  - `TypeError(/fetch|network/i)` → 네트워크 단절 안내 (`network`)
+  - `digest` 가 붙은 ServerAction 에러 → 마스킹된 메시지를 가정하고 일반 안내 (`server`)
+  - 그 외 → `unknown`
+- `NEXT_REDIRECT` / `NEXT_NOT_FOUND` 는 `digest` 문자열 검사로 정상 네비게이션 분기를 분리하여 Next 런타임으로 rethrow.
+- 반환 상태: `{ executeAction, isLoading, isError, error, errorKind, data, reset }`.
+
+**예제 (`app/test-0512/`)**
+- `_actions/main.ts` 의 Server Action 들을 화살표 함수 + `actionAgent` 래퍼 형태에서 **`export async function`** 으로 단순화하여 envelope 가공 없이 raw throw 가 그대로 위로 올라가도록 변경.
+- `fetchEmpList` 에 `db.transaction(...)` cascade 예제 추가 (INSERT → 정상 SELECT → 의도적 실패 SELECT 로 rollback 시연).
+- `page.tsx` 에 새 `useAction` 훅을 사용하는 `hookTest` 버튼을 추가하여 raw throw → 훅 분류 → alert 흐름을 시연.
+
 ---
 
 이 프로젝트를 통해 Next.js 16의 모든 라우팅 패턴을 **직접 구현하고 동작을 관찰**하며 깊이 있게 학습할 수 있습니다.

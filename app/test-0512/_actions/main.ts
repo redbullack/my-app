@@ -9,8 +9,8 @@
  * - fetchEmpList: JOB(필수) + EMPNO + ENAME 조건으로 SCOTT.EMP 조회
  */
 
-import { getDb } from '@/lib/db'
-import { actionAgent } from '@/lib/utils/server'
+import { getDb, QueryResult } from '@/lib/db'
+import { randomUUID } from 'node:crypto'
 
 const db = getDb('MAIN')
 
@@ -30,8 +30,7 @@ function buildInClause(
   return `${column} IN (${keys.join(', ')})`
 }
 
-export const fetchJobOptions = async () => {
-  // actionAgent('fetchJobOptions', async (): Promise<string[]> => {
+export async function fetchJobOptions() {
     const result = await db.query<{ VALUE: string }>(
       `SELECT DISTINCT JOB AS "VALUE"
          FROM SCOTT.EMP
@@ -41,8 +40,7 @@ export const fetchJobOptions = async () => {
     return result.rows.map(r => r.VALUE)
 }
 
-export const fetchEmpnoOptions = async (selectedJob: string[]) => {
-  // actionAgent('fetchEmpnoOptions', async (): Promise<string[]> => {
+export async function fetchEmpnoOptions(selectedJob: string[]) {
     const binds: Record<string, unknown> = {}
     const where = buildInClause('JOB', selectedJob, 'job', binds)
     const result = await db.query<{ VALUE: string }>(
@@ -55,8 +53,7 @@ export const fetchEmpnoOptions = async (selectedJob: string[]) => {
     return result.rows.map(r => r.VALUE)
 }
 
-export const fetchEnameOptions = async (selectedJob: string[]) => {
-  // actionAgent('fetchEnameOptions', async (): Promise<string[]> => {
+export async function fetchEnameOptions(selectedJob: string[]) {
     const binds: Record<string, unknown> = {}
     const where = buildInClause('JOB', selectedJob, 'job', binds)
     const result = await db.query<{ VALUE: string }>(
@@ -87,8 +84,7 @@ export interface EmpRow {
   DEPTNO: string | null
 }
 
-export const fetchEmpList = async (cond: EmpSearchCond) => {
-  // actionAgent('fetchEmpList', async () => {
+export async function fetchEmpList(cond: EmpSearchCond) {
     const binds: Record<string, unknown> = {}
     const where = [
       buildInClause('JOB', cond.job, 'job', binds),
@@ -96,18 +92,30 @@ export const fetchEmpList = async (cond: EmpSearchCond) => {
       buildInClause('ENAME', cond.ename, 'ename', binds),
     ].filter((c): c is string => c !== null)
 
-    return db.query<EmpRow>(
-      `SELECT TO_CHAR(EMPNO)                       AS "EMPNO"
-            , ENAME                                AS "ENAME"
-            , JOB                                  AS "JOB"
-            , TO_CHAR(MGR)                         AS "MGR"
-            , TO_CHAR(HIREDATE, 'YYYY-MM-DD')      AS "HIREDATE"
-            , TO_CHAR(SAL)                         AS "SAL"
-            , TO_CHAR(COMM)                        AS "COMM"
-            , TO_CHAR(DEPTNO)                      AS "DEPTNO"
-         FROM SCOTT.EMP
-        ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
-        ORDER BY EMPNO`,
-      binds,
-    )
+    let result = {} as QueryResult<EmpRow>
+
+    await db.transaction(async () => {
+      await db.execute(`INSERT INTO SCOTT.TEST_TABLE VALUES('${randomUUID()}', '${randomUUID()}', '${randomUUID()}', SYSDATE)`)
+
+      await db.query(`SELECT 'TEST 2' COL FROM DUAL`)
+
+      result = await db.query<EmpRow>(
+        `SELECT TO_CHAR(EMPNO)                       AS "EMPNO"
+              , ENAME                                AS "ENAME"
+              , JOB                                  AS "JOB"
+              , TO_CHAR(MGR)                         AS "MGR"
+              , TO_CHAR(HIREDATE, 'YYYY-MM-DD')      AS "HIREDATE"
+              , TO_CHAR(SAL)                         AS "SAL"
+              , TO_CHAR(COMM)                        AS "COMM"
+              , TO_CHAR(DEPTNO)                      AS "DEPTNO"
+          FROM SCOTT.EMP
+          ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
+          ORDER BY EMPNO`,
+        binds,
+      )
+
+      await db.query(`SELECT 'TEST 1' COL FROM DUAL_XXX`)
+    })
+
+    return result
 }

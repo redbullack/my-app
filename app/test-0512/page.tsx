@@ -23,7 +23,7 @@ import {
   type EmpRow,
   type EmpSearchCond,
 } from './_actions/main'
-import { ActionResponse } from '@/lib/utils'
+import { useAction } from '@/lib/utils/client'
 
 export default function Test0512Page() {
   const [cond, setCond] = useState<EmpSearchCond>({ job: [], empno: [], ename: [] })
@@ -52,6 +52,12 @@ export default function Test0512Page() {
     }
     setGridDataSource(() => fetchEmpList.bind(null, cond))
   }, [cond])
+
+  const {executeAction} = useAction<string>()
+  const hookTest = useCallback(async () => {
+    const result = await executeAction(() => fetchEmpList(cond))
+    alert(`result: ${result?.rows[0].ENAME}, ${result?.rows[1].ENAME}`)
+  }, [cond, executeAction])
 
   return (
     <main className="min-h-screen bg-bg-primary px-4 py-6">
@@ -84,6 +90,9 @@ export default function Test0512Page() {
             />
             <Button variant="primary" size="md" onClick={handleSearch}>
               조회
+            </Button>
+            <Button variant="primary" size="md" onClick={hookTest}>
+              hookTest
             </Button>
           </div>
 
