@@ -114,7 +114,7 @@ export async function fetchEmpList(cond: EmpSearchCond) {
         binds,
       )
 
-      await db.query(`SELECT 'TEST 1' COL FROM DUAL_XXX`)
+      await db.query(`SELECT 'TEST 1' COL FROM DUAL`)
     })
 
     return result
