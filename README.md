@@ -809,6 +809,15 @@ pnpm type-check
 - `fetchEmpList` 에 `db.transaction(...)` cascade 예제 추가 (INSERT → 정상 SELECT → 의도적 실패 SELECT 로 rollback 시연).
 - `page.tsx` 에 새 `useAction` 훅을 사용하는 `hookTest` 버튼을 추가하여 raw throw → 훅 분류 → alert 흐름을 시연.
 
+### DB 로거 hot path 최적화 — `logTarget` 모듈 캐싱
+
+**`lib/db/logger.ts`**
+- `insertLogQuery()` 가 매 호출마다 `resolveFromEnv('MAIN')` + `getProvider(...)` 를 재실행하던 것을 **모듈 스코프에 1회 캐싱** 하도록 변경.
+  - 로그 적재 대상은 항상 `'MAIN'` 으로 고정이고 env 는 프로세스 부팅 후 불변이므로, 매 쿼리마다 호출되는 hot path 에서 동일한 해석 비용을 반복할 이유가 없다.
+  - `type LogTarget = { provider: IDbProvider } & EnvResolveResult` 형태로 묶어 `getLogTarget()` 헬퍼가 lazy 초기화 + 캐시 hit 시 즉시 반환하도록 구성.
+  - env 미설정 상태에서는 캐싱하지 않아 추후 호출에서 재시도가 가능하다.
+- 사용하지 않던 `sqlPreview()` 유틸리티를 제거(주석 처리)하여 모듈 표면적을 축소.
+
 ---
 
 이 프로젝트를 통해 Next.js 16의 모든 라우팅 패턴을 **직접 구현하고 동작을 관찰**하며 깊이 있게 학습할 수 있습니다.

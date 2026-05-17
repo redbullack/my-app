@@ -21,8 +21,26 @@
  */
 
 import { getRequestCtx } from '@/lib/utils/server/requestContext'
-import { resolveFromEnv } from './resolvers/env'
+import { resolveFromEnv, type EnvResolveResult } from './resolvers/env'
 import { getProvider } from './providers'
+import type { IDbProvider } from './types'
+
+/**
+ * 로그 적재 대상은 항상 'MAIN' 으로 고정이고 env 는 프로세스 부팅 후 불변이므로
+ * provider/dsn/pool 해석 결과를 모듈 스코프에 1회만 캐싱한다.
+ * 매 쿼리마다 호출되는 hot path 에서 resolveFromEnv + getProvider 비용을 제거한다.
+ * env 미설정 시에는 캐싱하지 않아 추후 호출에서 재시도 가능하게 둔다.
+ */
+type LogTarget = { provider: IDbProvider } & EnvResolveResult
+let logTarget: LogTarget | null = null
+
+function getLogTarget(): LogTarget | null {
+  if (logTarget) return logTarget
+  const env = resolveFromEnv('MAIN')
+  if (!env) return null
+  logTarget = { provider: getProvider(env.providerName), ...env }
+  return logTarget
+}
 
 /**
  * factory 가 넘기는 쿼리 메타 (사용자 컨텍스트는 insertLogQuery 가 직접 조회).
@@ -39,12 +57,6 @@ export interface LogInfo {
   errorDesc?: string
 }
 
-/** SQL preview — 앞 200자, 줄바꿈/공백 정규화. */
-export function sqlPreview(sql: string, max = 200): string {
-  const flat = sql.replace(/\s+/g, ' ').trim()
-  return flat.length <= max ? flat : flat.slice(0, max) + '…'
-}
-
 /**
  * 쿼리 이력 1건 적재. 호출자는 `void insertLogQuery(...)` 형태로 fire-and-forget 호출한다.
  * provider 를 직접 호출하여 factory 의 txStore 영향권 밖에서 실행된다.
@@ -54,15 +66,13 @@ export async function insertLogQuery(fields: LogInfo): Promise<void> {
     // 사용자 컨텍스트는 logger 가 직접 조회 — factory 는 쿼리 메타만 넘기면 된다.
     const reqCtx = await getRequestCtx()
 
-    const envResult = resolveFromEnv('MAIN')
-    if (!envResult) return
+    const target = getLogTarget()
+    if (!target) return
 
-    const provider = getProvider(envResult.providerName)
-
-    await provider.execute(
+    await target.provider.execute(
       'MAIN',
-      envResult.dsn,
-      envResult.pool,
+      target.dsn,
+      target.pool,
       `INSERT INTO SCOTT.NEXT_TEST_LOG_QUERY
           (DB_NAME, PROVIDER, OP, SQL_PREVIEW,
            STATUS, STARTED_AT, ENDED_AT, ROW_COUNT,
@@ -98,3 +108,9 @@ export async function insertLogQuery(fields: LogInfo): Promise<void> {
     console.warn('[db.log.insert.failed]', err)
   }
 }
+
+/** SQL preview — 앞 200자, 줄바꿈/공백 정규화. */
+// export function sqlPreview(sql: string, max = 200): string {
+//   const flat = sql.replace(/\s+/g, ' ').trim()
+//   return flat.length <= max ? flat : flat.slice(0, max) + '…'
+// }
