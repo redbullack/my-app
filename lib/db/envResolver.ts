@@ -91,10 +91,14 @@ function parseAdoConnectionString(
       `DB_CONNECTION__${name}: connectionString 에 User ID, Password, Data Source 가 모두 필요합니다`,
     )
   }
-
+  console.log(`TEST - envResolver.ts - name: ${name}, poolMin: ${poolMin}, poolMax:${poolMax}, poolIncrement: ${poolIncrement}`)
   return {
     providerName,
     dsn: { user, password, connectString },
-    pool: { min: poolMin, max: poolMax, increment: poolIncrement },
+    pool: {
+      min: poolMin ?? 10,
+      max: poolMax ?? 100,
+      increment: poolIncrement ?? 1
+    }
   }
 }

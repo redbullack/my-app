@@ -16,48 +16,75 @@ import RouteInfo from '@/components/shared/RouteInfo'
 import { toast } from '@/components/control/Toast'
 import type { QueryResult } from '@/lib/db'
 import {
-  fetchEmpList,
-  fetchEmpnoOptions,
-  fetchEnameOptions,
-  fetchJobOptions,
-  type EmpRow,
-  type EmpSearchCond,
+  // fetchEmpList,
+  // fetchEmpnoOptions,
+  // fetchEnameOptions,
+  // fetchJobOptions,
+  // type EmpRow,
+  // type EmpSearchCond,
+  myServerAction
 } from './_actions/main'
 import { useAction } from '@/lib/utils/client'
 
 export default function Test0512Page() {
-  const [cond, setCond] = useState<EmpSearchCond>({ job: [], empno: [], ename: [] })
-  const [gridDataSource, setGridDataSource] = useState<QueryResult<EmpRow> | (() => ReturnType<typeof fetchEmpList>)>({ columns: [], rows: [] })
-  // const [gridDataSource, setGridDataSource] = useState<QueryResult<EmpRow> | (() => Promise<ActionResponse<QueryResult<EmpRow>>>)>({ columns: [], rows: [] })
+  const {executeAction, data, error, errorKind, isError, isLoading, reset} = useAction()
 
-  const jobDataSource = useCallback(() => fetchJobOptions(), [])
-  const empnoDataSource = useMemo(() => fetchEmpnoOptions.bind(null, cond.job), [cond.job])
-  const enameDataSource = useMemo(() => fetchEnameOptions.bind(null, cond.job), [cond.job])
+  // const handleMyServerAction = useCallback(async () => {
+  //   const result = await myServerAction('This is from page.tsx ~')
+  //   result.columns.forEach((col) => {
+  //     console.log(`col.name: ${col.name}, col.type: ${col.type}`)
+  //   })
+  //   result.rows.forEach((row) => {
+  //     console.log(`COL1: ${row.COL1}, COL2: ${row.COL2}, COL3: ${row.COL3}, USER_ID: ${row.USER_ID}, COL1: ${row.BIND_COL}`)
+  //   })
+  //   alert(`result: ${result.rows.length} !`)
+  // }, [])
 
-  const handleSelectChange = useCallback((next: string[], id?: string) => {
-    setCond(prev => {
-      switch (id) {
-        case 'job':   return { job: next, empno: [], ename: [] }
-        case 'empno': return { ...prev, empno: next }
-        case 'ename': return { ...prev, ename: next }
-        default: return prev
-      }
+  const handleMyServerAction = useCallback(async () => {
+    const result = await myServerAction(`This is from page.tsx ~`)
+    result.rows.forEach((row) => {
+        console.log(`COL1: ${row.COL1}, COL2: ${row.COL2}, COL3: ${row.COL3}, USER_ID: ${row.USER_ID}, BIND_COL: ${row.BIND_COL},`)
     })
+    alert(`result: ${result.rows.length} !`)
   }, [])
 
-  const handleSearch = useCallback(() => {
-    if (cond.job.length === 0) {
-      toast('JOB은 필수 선택 항목입니다.', { variant: 'warning' })
-      return
-    }
-    setGridDataSource(() => fetchEmpList.bind(null, cond))
-  }, [cond])
+//   const handleMyTxServerAction = useCallback(async () => {
+//     const result = await myServerAction('This is from page.tsx ~')
+//     alert(`result: ${result.rows.length} !`)
+//   }, [])
 
-  const {executeAction} = useAction<string>()
-  const hookTest = useCallback(async () => {
-    const result = await executeAction(() => fetchEmpList(cond))
-    alert(`result: ${result?.rows[0].ENAME}, ${result?.rows[1].ENAME}`)
-  }, [cond, executeAction])
+  // const [cond, setCond] = useState<EmpSearchCond>({ job: [], empno: [], ename: [] })
+  // const [gridDataSource, setGridDataSource] = useState<QueryResult<EmpRow> | (() => ReturnType<typeof fetchEmpList>)>({ columns: [], rows: [] })
+  // // const [gridDataSource, setGridDataSource] = useState<QueryResult<EmpRow> | (() => Promise<ActionResponse<QueryResult<EmpRow>>>)>({ columns: [], rows: [] })
+
+  // const jobDataSource = useCallback(() => fetchJobOptions(), [])
+  // const empnoDataSource = useMemo(() => fetchEmpnoOptions.bind(null, cond.job), [cond.job])
+  // const enameDataSource = useMemo(() => fetchEnameOptions.bind(null, cond.job), [cond.job])
+
+  // const handleSelectChange = useCallback((next: string[], id?: string) => {
+  //   setCond(prev => {
+  //     switch (id) {
+  //       case 'job':   return { job: next, empno: [], ename: [] }
+  //       case 'empno': return { ...prev, empno: next }
+  //       case 'ename': return { ...prev, ename: next }
+  //       default: return prev
+  //     }
+  //   })
+  // }, [])
+
+  // const handleSearch = useCallback(() => {
+  //   if (cond.job.length === 0) {
+  //     toast('JOB은 필수 선택 항목입니다.', { variant: 'warning' })
+  //     return
+  //   }
+  //   setGridDataSource(() => fetchEmpList.bind(null, cond))
+  // }, [cond])
+
+  // const {executeAction} = useAction<string>()
+  // const hookTest = useCallback(async () => {
+  //   const result = await executeAction(() => fetchEmpList(cond))
+  //   alert(`result: ${result?.rows[0].ENAME}, ${result?.rows[1].ENAME}`)
+  // }, [cond, executeAction])
 
   return (
     <main className="min-h-screen bg-bg-primary px-4 py-6">
@@ -68,7 +95,7 @@ export default function Test0512Page() {
 
         <Panel variant="outlined">
           <div className="grid grid-cols-1 gap-3 p-3 border-b border-border md:grid-cols-[1fr_1fr_1fr_auto] md:items-end">
-            <Input
+            {/* <Input
               id="job" type="select" label="JOB *"
               value={cond.job} onChange={handleSelectChange}
               dataSource={jobDataSource}
@@ -93,16 +120,19 @@ export default function Test0512Page() {
             </Button>
             <Button variant="primary" size="md" onClick={hookTest}>
               hookTest
+            </Button> */}
+            <Button variant="primary" size="md" onClick={handleMyServerAction}>
+              handleMyServerAction
             </Button>
           </div>
 
-          <Grid
+          {/* <Grid
             dataSource={gridDataSource}
             height="500px"
             rowHeight={34}
             rowHeaders={['rowNum']}
             columnResizable
-          />
+          /> */}
         </Panel>
 
         <div className="mt-6">
