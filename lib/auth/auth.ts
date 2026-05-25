@@ -11,7 +11,7 @@
 import NextAuth from 'next-auth'
 import Credentials from 'next-auth/providers/credentials'
 import type { Emp } from '@/types/emp'
-import { getDb } from '../db/db-new'
+import { getDb } from '../db/db-new2'
 // import { getDb } from '@/lib/db/db'
 
 
