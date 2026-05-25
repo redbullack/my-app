@@ -20,8 +20,8 @@
  *     `insertLogQuery` 를 다시 호출하므로 우회하지 않으면 무한 재귀가 된다.
  */
 
-import { getPool, getProviderOption } from './db'
-import { getRequestCtx } from '@/lib/utils/server/requestContext'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { getDb } from "./db-new2"
 
 /** factory(db.ts) 가 넘기는 쿼리 메타. 사용자 컨텍스트는 본 모듈이 직접 조회한다. */
 export interface LogInfo {
@@ -29,62 +29,61 @@ export interface LogInfo {
   provider?: string
   op?: string
   sql?: string
-  startedAt?: string
-  endedAt?: string
+  binds?: string
+  startedAt?: Date
+  endedAt?: Date
   rowCount?: number
   /** 있으면 STATUS='FAIL', 없으면 'OK'. `util.inspect(err, ...)` 결과 그대로. */
   errorDesc?: string
+  userId?: string
+  userName?: string
+  role?: string
+  empno?: string
 }
+
+const logSkipALS = new AsyncLocalStorage<boolean>()
+export const isLogSkip = ():boolean => logSkipALS.getStore() === true
 
 /**
  * 쿼리 이력 1건 적재. `void insertLogQuery(...)` 로 호출.
  * agent 의 로깅 경로를 우회하기 위해 providerOp.rawExecute 를 직접 호출한다.
  */
 export async function insertLogQuery(fields: LogInfo): Promise<void> {
-  let conn: unknown | undefined
-  let providerOp: ReturnType<typeof getProviderOption> | undefined
   try {
-    const reqCtx = await getRequestCtx()
-    const cachedPool = await getPool('MAIN')
-    providerOp = getProviderOption(cachedPool)
-
-    conn = await providerOp.getConnection()
-    await providerOp.rawExecute(
-      conn,
-      'execute',
-      `INSERT INTO SCOTT.NEXT_TEST_LOG_QUERY
-          (DB_NAME, PROVIDER, OP, SQL_PREVIEW,
-           STATUS, STARTED_AT, ENDED_AT, ROW_COUNT,
-           PAGE_PATH, USER_ID, USER_NAME, ROLE, EMPNO,
-           ERROR_DESC, CREATED_AT)
-         VALUES
-          (:dbName, :provider, :op, :sql,
-           :status, :startedAt, :endedAt, :rowCount,
-           :pagePath, :userId, :userName, :role, :empno,
-           :errorDesc, SYSDATE)`,
-      {
-        dbName:    fields.db        ?? null,
-        provider:  fields.provider  ?? null,
-        op:        fields.op        ?? null,
-        sql:       typeof fields.sql === 'string' ? fields.sql : null,
-        status:    fields.errorDesc ? 'FAIL' : 'OK',
-        startedAt: fields.startedAt ?? null,
-        endedAt:   fields.endedAt   ?? null,
-        rowCount:  fields.rowCount  ?? null,
-        pagePath:  reqCtx.pagePath  ?? null,
-        userId:    reqCtx.userId    ?? null,
-        userName:  reqCtx.userName  ?? null,
-        role:      reqCtx.role      ?? null,
-        empno:     reqCtx.empno     ?? null,
-        errorDesc: fields.errorDesc ?? null,
-      },
-      true, // autoCommit — 사용자 트랜잭션과 완전히 분리
-    )
+    await logSkipALS.run(true, async () =>{
+        await getDb({ name: 'MAIN', isUserLess: true }).run(async (client) => {
+            await client.execute(
+                `INSERT INTO SCOTT.NEXT_TEST_LOG_QUERY
+                    (DB_NAME, PROVIDER, OP, SQL_PREVIEW, BINDS,
+                    STATUS, STARTED_AT, ENDED_AT, ROW_COUNT,
+                    PAGE_PATH, USER_ID, USER_NAME, ROLE, EMPNO,
+                    ERROR_DESC, CREATED_AT)
+                    VALUES
+                    (:dbName, :provider, :op, :sql, :binds,
+                    :status, :startedAt, :endedAt, :rowCount,
+                    :pagePath, :userId, :userName, :role, :empno,
+                    :errorDesc, SYSDATE)`,
+                    {
+                        dbName:    fields.db        ?? null,
+                        provider:  fields.provider  ?? null,
+                        op:        fields.op        ?? null,
+                        sql:       typeof fields.sql === 'string' ? fields.sql : null,
+                        binds:     fields.binds     ?? null,
+                        status:    fields.errorDesc ? 'FAIL' : 'OK',
+                        startedAt: fields.startedAt ?? null,
+                        endedAt:   fields.endedAt   ?? null,
+                        rowCount:  fields.rowCount  ?? null,
+                        pagePath:  null,
+                        userId:    fields.userId    ?? null,
+                        userName:  fields.userName  ?? null,
+                        role:      fields.role      ?? null,
+                        empno:     fields.empno     ?? null,
+                        errorDesc: fields.errorDesc ?? null,
+                    },
+            )
+        })
+    })
   } catch (err) {
     console.warn('[db.log.insert.failed]', err)
-  } finally {
-    if (conn && providerOp) {
-      try { await providerOp.release(conn) } catch { /* noop */ }
-    }
   }
 }

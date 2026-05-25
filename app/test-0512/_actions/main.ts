@@ -13,17 +13,24 @@
 
 import { randomUUID } from 'node:crypto'
 // import { getDb } from '@/lib/db/db'
-import { getDb } from '@/lib/db/db-new'
+import { getDb } from '@/lib/db/db-new2'
 
 export async function myServerAction(paramStr: string) {
-  return await getDb({isTransaction: true}).run(async (agent, userInfo) => {
-    await agent.execute(`INSERT INTO SCOTT.TEST_TABLE VALUES ('${randomUUID()}', '${randomUUID()}', '${randomUUID()}', SYSDATE) `)
-    await agent.execute(`INSERT INTO SCOTT.TEST_TABLE VALUES ('${randomUUID()}', '${randomUUID()}', '${randomUUID()}', SYSDATE) `)
-    return await agent.execute<{ COL1: string, COL2: string, COL3: string, BIND_COL: string, USER_ID: string }>(
-      `SELECT COL1, COL2, COL3, :BIND_COL BIND_COL, '${userInfo?.user.id}' USER_ID FROM SCOTT.TEST_TABLE_XXX `,
-      {BIND_COL: paramStr}
-    )
-  })
+    // return await getDb({ isUserLess: false }).run(async (client, userInfo) => {
+    //     return await client.execute<{ COL1: string, COL2: string, COL3: string, BIND_COL: string, USER_ID: string }>(
+    //         `SELECT COL1, COL2, COL3, :BIND_COL BIND_COL, '${userInfo?.user.id}' USER_ID FROM SCOTT.TEST_TABLE `,
+    //         {BIND_COL: paramStr}
+    //     )
+    // })
+
+    return await getDb({isTransaction: true}).run(async (client, userInfo) => {
+        await client.execute(`INSERT INTO SCOTT.TEST_TABLE VALUES ('${randomUUID()}', '${randomUUID()}', '${randomUUID()}', SYSDATE) `)
+        await client.execute(`INSERT INTO SCOTT.TEST_TABLE VALUES ('${randomUUID()}', '${randomUUID()}', '${randomUUID()}', SYSDATE) `)
+        return await client.execute<{ COL1: string, COL2: string, COL3: string, BIND_COL: string, USER_ID: string }>(
+            `SELECT COL1, COL2, COL3, :BIND_COL BIND_COL, '${userInfo?.user.id}' USER_ID FROM SCOTT.TEST_TABLE_XXX `,
+            {BIND_COL: paramStr}
+        )
+    })
 }
 
 // const db = getDb('MAIN')
