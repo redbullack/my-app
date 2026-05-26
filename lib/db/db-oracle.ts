@@ -72,6 +72,7 @@ export async function runOracle<R>(
     const client: DbClient = {
         async execute<T = Record<string, unknown>>(sql: string, binds: BindParams = {}): Promise<DbResult<T>> {
             const startedAt = new Date()
+            const bindsJson = Object.keys(binds).length > 0 ? JSON.stringify(binds) : undefined
             try {
                 const result = await conn.execute<T>(
                     sql, binds as oracledb.BindParameters,
@@ -92,7 +93,7 @@ export async function runOracle<R>(
                 if (!isLogSkip()) {
                     void insertLogQuery({
                         db: name, provider: 'oracle', op: 'execute',
-                        sql, binds: JSON.stringify(binds),
+                        sql, binds: bindsJson,
                         startedAt, endedAt: new Date(),
                         rowCount: dbResult.affectedCount,
                         userId: userInfo?.user.id,
@@ -106,7 +107,7 @@ export async function runOracle<R>(
                 if (!isLogSkip()) {
                     void insertLogQuery({
                         db: name, provider: 'oracle', op: 'execute',
-                        sql, binds: JSON.stringify(binds),
+                        sql, binds: bindsJson,
                         startedAt, endedAt: new Date(),
                         errorDesc: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
                         userId: userInfo?.user.id,
