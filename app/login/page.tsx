@@ -7,13 +7,16 @@
  * Server Component로 렌더링하고, 폼은 Client Component(LoginForm)로 분리한다.
  */
 
+import { Suspense } from 'react'
 import LoginForm from './LoginForm'
 import RouteInfo from '@/components/shared/RouteInfo'
 
 export default function LoginPage() {
   return (
     <div className="flex min-h-[80vh] flex-col items-center justify-center px-4">
-      <LoginForm />
+      <Suspense>
+        <LoginForm />
+      </Suspense>
 
       <div className="mt-8 w-full max-w-md">
         <RouteInfo

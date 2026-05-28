@@ -9,11 +9,15 @@
 
 import { useState } from 'react'
 import { signIn } from 'next-auth/react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Button, Input, Panel } from '@/components/control'
 
 export default function LoginForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  // 오픈 리다이렉트 방지: 내부 경로('/...')만 허용, 아니면 /dashboard로
+  const raw = searchParams.get('callbackUrl') ?? ''
+  const callbackUrl = raw.startsWith('/') ? raw : '/dashboard'
   const [username, setUsername] = useState('SMITH')
   const [password, setPassword] = useState('password123')
   const [error, setError] = useState('')
@@ -34,7 +38,7 @@ export default function LoginForm() {
       if (result?.error) {
         setError('사원명(ENAME) 또는 비밀번호가 올바르지 않습니다.')
       } else {
-        router.push('/dashboard')
+        router.push(callbackUrl)
         router.refresh()
       }
     } catch {
