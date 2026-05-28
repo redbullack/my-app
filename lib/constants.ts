@@ -7,6 +7,8 @@ import type { NavItem, Post } from '@/types'
 /** 메인 네비게이션 항목 */
 export const NAV_ITEMS: NavItem[] = [
   { label: '홈', href: '/' },
+  { label: 'A001', href: '/A001', description: 'A001' },
+  { label: 'A002', href: '/A002', description: 'A002' },
   { label: 'About', href: '/about', description: 'Route Group (marketing)' },
   { label: 'Pricing', href: '/pricing', description: 'Route Group (marketing)' },
   { label: 'Dashboard', href: '/dashboard', description: 'Route Group (dashboard)' },

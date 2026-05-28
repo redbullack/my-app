@@ -803,6 +803,33 @@ pnpm type-check
 
 ## 🆕 최근 변경 사항 (Recent Changes)
 
+### 화면(appId) + 지역(deptSite) 라우팅·인가 체계 도입
+
+운영 환경에서 화면을 `A001`~`A999` 형태의 appId 폴더로 관리하고, 지역 소속(`deptSite`: KR/JP/CN)에 따라 접근을 통제하는 체계를 추가했다.
+
+**라우팅 규칙**
+- 화면당 폴더 1개(`app/A001/page.tsx`)로 평평하게 유지한다. deptSite별 폴더를 따로 만들지 않는다.
+- `/A001` 접속 시 플래그 우선순위(KR→JP→CN)로 default deptSite를 결정해 `/A001/KR` 로 redirect.
+- `/A001/JP` 처럼 세그먼트로 지역을 지정하면, `proxy.ts` 가 평평 폴더(`/A001`)로 **rewrite** 하여 주소창은 유지한 채 단일 폴더가 서빙한다.
+
+**인가 (`proxy.ts`)** — 모든 검증을 요청 입구에서 처리하며 DB I/O는 최소화한다.
+1. 비로그인 차단 — `getToken()` 으로 검증, 원래 경로를 `callbackUrl` 로 넘겨 로그인 후 복귀.
+2. 화면의 deptSite 지원 여부 — 기준정보 테이블을 `getDeptSitesCached()`(TTL 60초 모듈 캐시)로 조회해 미지원 시 404.
+3. bizSite 권한 — JWT 플래그(`hasKrFlag`/`hasJpFlag`/`hasCnFlag`)로 판단, 미보유 시 403.
+4. appId 권한 — `token.role === 'ADMIN'` 은 전체 허용, `USER` 는 `token.appIds`(쉼표 구분 문자열, 예: `'A001,A002'`)에 포함될 때만 허용. 로그인 시 1회 DB 조회로 토큰에 적재하는 전제(요청당 DB 0회).
+
+**기준정보 저장 전략 (`lib/appRegistry.ts`)**
+- appId→지원 deptSite 매핑은 `APP_DEPT_MAP(APP_ID, HAS_KR_FLAG, HAS_JP_FLAG, HAS_CN_FLAG)` 테이블을 읽되, **모듈 스코프 TTL 캐시(60초)**로 감싸 요청당 DB 조회를 막는다. 멀티 인스턴스(L4, sticky 없음)에서 인스턴스마다 독립 캐시하며 read-only라 불일치는 최대 TTL만큼만 발생.
+
+**화면 컨텍스트 주입**
+- 클라이언트: `lib/hooks/useAppInfo.ts` — `usePathname()` 파싱으로 `{ appId, deptSite }` 를 한 줄에 제공.
+- 서버: `proxy.ts` 가 rewrite 시 request 헤더(`x-app-id`, `x-dept-site`)를 주입하고, `getDb().run()` 콜백이 `userInfo` 와 동일한 방식으로 `appInfo`(3번째 인자)를 받는다. 미들웨어 등 `headers()` 불가 컨텍스트에서는 try/catch로 `undefined` 처리해 안전하다.
+
+**기타**
+- `app/login/LoginForm.tsx` / `app/login/page.tsx` — `callbackUrl` 기반 로그인 후 복귀(오픈 리다이렉트 방지 가드 + `Suspense` 경계) 추가.
+- `lib/constants.ts` — 메인 네비게이션에 A001/A002 항목 추가.
+- 권한 거부 화면은 `/_not-found`(404) rewrite 및 403 응답으로 처리.
+
 ### Multi-DB Provider 확장 & dataSource 정규화 헬퍼 도입
 
 **DB 레이어 (`lib/db/`)**

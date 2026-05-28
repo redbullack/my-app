@@ -5,7 +5,7 @@
 
 import { Pool as PgPool, type PoolClient as PgClient } from 'pg'
 import type { Session } from 'next-auth'
-import type { DbClient, DbResult, BindParams, ColumnType } from './db-new2'
+import type { DbClient, DbResult, BindParams, ColumnType, AppInfo } from './db-new2'
 
 export type PgConfig = {
     providerName: 'postgres'
@@ -28,8 +28,9 @@ export async function runPg<R>(
     name: string,
     config: PgConfig,
     isTransaction: boolean,
-    callback: (client: DbClient, userInfo?: Session) => Promise<R>,
+    callback: (client: DbClient, userInfo?: Session, appInfo?: AppInfo) => Promise<R>,
     userInfo: Session | undefined,
+    appInfo: AppInfo | undefined,
 ): Promise<R> {
     // 풀 확보
     const poolStore = globalDbCache.__myapp_pg_pool__ ??= new Map<string, PgPool>()
@@ -75,10 +76,10 @@ export async function runPg<R>(
     }
 
     try {
-        if (!isTransaction) return await callback(client, userInfo)
+        if (!isTransaction) return await callback(client, userInfo, appInfo)
         await conn.query('BEGIN')
         try {
-            const result = await callback(client, userInfo)
+            const result = await callback(client, userInfo, appInfo)
             await conn.query('COMMIT')
             return result
         } catch (err) {

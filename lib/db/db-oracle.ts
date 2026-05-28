@@ -6,8 +6,8 @@
 import path from 'node:path'
 import oracledb from 'oracledb'
 import type { Session } from 'next-auth'
-import type { DbClient, DbResult, BindParams, ColumnType } from './db-new2'
-import { insertLogQuery, isLogSkip } from './logger-new'
+import type { DbClient, DbResult, BindParams, ColumnType, AppInfo } from './db-new2'
+// import { insertLogQuery, isLogSkip } from './logger-new'
 
 export type OracleConfig = {
     providerName: 'oracle'
@@ -30,8 +30,9 @@ export async function runOracle<R>(
     name: string,
     config: OracleConfig,
     isTransaction: boolean,
-    callback: (client: DbClient, userInfo?: Session) => Promise<R>,
+    callback: (client: DbClient, userInfo?: Session, appInfo?: AppInfo) => Promise<R>,
     userInfo: Session | undefined,
+    appInfo: AppInfo | undefined,
 ): Promise<R> {
     // Oracle Thick 모드 초기화 (프로세스 1회)
     if (!(globalDbCache.__myapp_oracle_thick_initialized__ ??= false)) {
@@ -89,41 +90,41 @@ export async function runOracle<R>(
                     rows: (result.rows ?? []) as T[],
                     affectedCount: result.rows?.length ?? result.rowsAffected ?? 0,
                 }
-                if (!isLogSkip()) {
-                    void insertLogQuery({
-                        db: name, provider: 'oracle', op: 'execute',
-                        sql, binds: JSON.stringify(binds),
-                        startedAt, endedAt: new Date(),
-                        rowCount: dbResult.affectedCount,
-                        userId: userInfo?.user.id,
-                        userName: userInfo?.user.name,
-                        role: userInfo?.user.role,
-                        empno: userInfo?.user.empno.toString(),
-                    })
-                }
+                // if (!isLogSkip()) {
+                //     void insertLogQuery({
+                //         db: name, provider: 'oracle', op: 'execute',
+                //         sql, binds: JSON.stringify(binds),
+                //         startedAt, endedAt: new Date(),
+                //         rowCount: dbResult.affectedCount,
+                //         userId: userInfo?.user.id,
+                //         userName: userInfo?.user.name,
+                //         role: userInfo?.user.role,
+                //         empno: userInfo?.user.empno.toString(),
+                //     })
+                // }
                 return dbResult
             } catch (err) {
-                if (!isLogSkip()) {
-                    void insertLogQuery({
-                        db: name, provider: 'oracle', op: 'execute',
-                        sql, binds: JSON.stringify(binds),
-                        startedAt, endedAt: new Date(),
-                        errorDesc: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
-                        userId: userInfo?.user.id,
-                        userName: userInfo?.user.name,
-                        role: userInfo?.user.role,
-                        empno: userInfo?.user.empno.toString(),
-                    })
-                }
+                // if (!isLogSkip()) {
+                //     void insertLogQuery({
+                //         db: name, provider: 'oracle', op: 'execute',
+                //         sql, binds: JSON.stringify(binds),
+                //         startedAt, endedAt: new Date(),
+                //         errorDesc: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+                //         userId: userInfo?.user.id,
+                //         userName: userInfo?.user.name,
+                //         role: userInfo?.user.role,
+                //         empno: userInfo?.user.empno.toString(),
+                //     })
+                // }
                 throw err
             }
         },
     }
 
     try {
-        if (!isTransaction) return await callback(client, userInfo)
+        if (!isTransaction) return await callback(client, userInfo, appInfo)
         try {
-            const result = await callback(client, userInfo)
+            const result = await callback(client, userInfo, appInfo)
             await conn.commit()
             return result
         } catch (err) {
