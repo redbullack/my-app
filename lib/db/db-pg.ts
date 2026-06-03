@@ -30,7 +30,7 @@ export async function runPg<R>(
     isTransaction: boolean,
     callback: (client: DbClient, userInfo?: Session, appInfo?: AppInfo) => Promise<R>,
     userInfo: Session | undefined,
-    appInfo: AppInfo | undefined,
+    appInfo: AppInfo,
 ): Promise<R> {
     // 풀 확보
     const poolStore = globalDbCache.__myapp_pg_pool__ ??= new Map<string, PgPool>()

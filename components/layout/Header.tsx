@@ -184,7 +184,7 @@ export default function Header() {
           {session?.user ? (
             <div className="hidden items-center gap-2 md:flex">
               <span className="text-sm text-text-secondary">
-                {session.user.name}
+                {session.user.userId}
               </span>
               <button
                 onClick={() => signOut({ callbackUrl: '/login' })}
@@ -231,9 +231,9 @@ export default function Header() {
           ))}
           {session?.user ? (
             <div className="border-t border-border mt-2 pt-2">
-              <span className="block px-3 py-1 text-xs text-text-muted">{session.user.name}</span>
+              <span className="block px-3 py-1 text-xs text-text-muted">{session.user.userId}</span>
               <button
-                onClick={() => { setMobileOpen(false); signOut({ callbackUrl: '/login' }) }}
+                onClick={async () => { setMobileOpen(false); await signOut({ callbackUrl: '/login' }) }}
                 className="block w-full rounded-md px-3 py-2 text-left text-sm text-text-secondary hover:bg-bg-tertiary"
               >
                 로그아웃

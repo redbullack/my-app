@@ -32,7 +32,7 @@ export async function runOracle<R>(
     isTransaction: boolean,
     callback: (client: DbClient, userInfo?: Session, appInfo?: AppInfo) => Promise<R>,
     userInfo: Session | undefined,
-    appInfo: AppInfo | undefined,
+    appInfo: AppInfo,
 ): Promise<R> {
     // Oracle Thick 모드 초기화 (프로세스 1회)
     if (!(globalDbCache.__myapp_oracle_thick_initialized__ ??= false)) {
@@ -40,7 +40,7 @@ export async function runOracle<R>(
         const libDir = path.resolve(process.cwd(), 'vendor/instantclient/instantclient_21_20')
         oracledb.initOracleClient({ libDir })
         globalDbCache.__myapp_oracle_thick_initialized__ = true
-        console.log(`테스트 테스트 테스트 - Thick Mode OK (${Date.now() - thickStartTime}) - ClientVersion: ${oracledb.oracleClientVersionString}, thin: ${oracledb.thin}`)
+        console.log(`getDb - Thick Mode OK (${Date.now() - thickStartTime}) - ClientVersion: ${oracledb.oracleClientVersionString}, thin: ${oracledb.thin}`)
     }
 
     // 풀 확보 (없으면 생성, 있으면 재사용)
@@ -60,14 +60,14 @@ export async function runOracle<R>(
             queueTimeout: config.queueTimeout ?? 3000,
             poolAlias: name,
         })
-        console.log(`테스트 테스트 테스트 - oracledb pool created (${Date.now() - poolStartTime}) - name: ${name}, poolMin: ${config.poolMin}, ${config.poolMax}, config.poolIncrement: ${config.poolIncrement}`)
+        console.log(`getDb - oracledb pool created (${Date.now() - poolStartTime}) - name: ${name}, poolMin: ${config.poolMin}, ${config.poolMax}, config.poolIncrement: ${config.poolIncrement}`)
         poolStore.set(name, pool)
     }
 
     // Connection 가져오기
     const connStartTime = Date.now()
     const conn = await pool.getConnection()
-    console.log(`테스트 테스트 테스트 - pool.getConnection (${Date.now() - connStartTime})`)
+    console.log(`getDb - pool.getConnection (${Date.now() - connStartTime})`)
 
     // DbClient — Oracle execute
     const client: DbClient = {

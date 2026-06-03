@@ -1,19 +1,12 @@
-/**
- * @route /A001 · /A001/KR · /A001/JP · /A001/CN
- * @pattern 평평한 화면 폴더 + proxy rewrite + useAppInfo
- * @description
- * 화면(appId)당 폴더 1개(app/A001) 원칙. deptSite는 별도 폴더 없이
- * URL 세그먼트로만 받는다. proxy.ts가 인가 검증 + rewrite를 처리하고,
- * 이 화면은 useAppInfo()로 appId/deptSite를 한 줄에 읽어 쓴다.
- */
 'use client'
 
+import Link from 'next/link'
 import { useAppInfo } from '@/lib/hooks/useAppInfo'
 import { Button, Panel, Badge } from '@/components/control'
 import { useCallback } from 'react'
 import { myServerAction } from './_actions/main'
 
-export default function A001Page() {
+export default function A00001Page() {
     const appInfo = useAppInfo()
 
     const handleMyServerAction = useCallback(async () => {
@@ -33,6 +26,19 @@ export default function A001Page() {
                     <Button variant="primary" onClick={handleMyServerAction}>
                         확인
                     </Button>
+
+                    {/* prefetch 체험용: 아래 Link 가 화면에 보이는 순간 Next.js 가 자동으로 /A00002 에 대한
+                        prefetch 요청을 쏜다. 클릭하지 않아도 proxy.ts 의 로그에 next-router-prefetch: 1 로 찍히는
+                        요청이 들어오는 걸 확인할 수 있다. (prefetch={false} 로 끄면 hover/표시 시 요청이 사라진다) */}
+                    <div className="flex flex-col gap-2 border-t border-[var(--color-border)] pt-4">
+                        <span className="text-sm text-text-secondary">prefetch 체험</span>
+                        <Link href="/A00002" className="text-accent underline">
+                            /A00002 로 이동 (자동 prefetch O)
+                        </Link>
+                        <Link href="/A00002/JP" prefetch={false} className="text-accent underline">
+                            /A00002/JP 로 이동 (prefetch X)
+                        </Link>
+                    </div>
                 </div>
             </Panel>
         </div>
